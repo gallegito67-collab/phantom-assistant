@@ -9,8 +9,8 @@
   "dependencies": {
     "discord.js": "^14.21.0",
     "psn-api": "^2.18.1"
+  },
+  "engines": {
+    "node": ">=20"
   }
-}
-"engines": {
-  "node": ">=20"
 }
