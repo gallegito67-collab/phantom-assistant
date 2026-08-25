@@ -6,6 +6,9 @@ const {
   SlashCommandBuilder,
   EmbedBuilder,
   ActionRowBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder
 } = require("discord.js");
@@ -51,7 +54,13 @@ const DATABASE_FILE = path.join(
 );
 
 const PERFORMANCE_GIF =
-  "https://cdn.discordapp.com/attachments/1541467260642664623/1541754421711470722/0824.gif";
+  "https://cdn.discordapp.com/attachments/1541467260642664623/1541754421711470722/0824.gif?ex=6a8ebe32&is=6a8d6cb2&hm=f2c70feb1c047bda392c0623f157fc3c57a5970947de3b2a5bce3cbde8d35111&";
+
+const PANEL_THUMBNAIL =
+  PERFORMANCE_GIF;
+
+const PANEL_IMAGE =
+  "https://cdn.discordapp.com/attachments/1541467260642664623/1541767013586960455/08241.gif?ex=6a8ec9ec&is=6a8d786c&hm=a4cdda6cdf51990839491527e2ba0dc7a4a9e578a8a621260a828e7cf708ac44&";
 
 const PSN_NPSSO =
   process.env.PSN_NPSSO || "";
@@ -79,7 +88,22 @@ function cargarBaseDeDatos() {
     if (!fs.existsSync(DATABASE_FILE)) {
       return {
         players: {},
-        onlineTribe: null
+        onlineTribe: null,
+        caHistorial: {
+          servers: [],
+          panel: null
+        },
+        spot: {
+          cueva: "",
+          mapa: "",
+          server: "",
+          panel: null
+        },
+        nextWipe: {
+          fecha: "",
+          server: "",
+          panel: null
+        }
       };
     }
 
@@ -100,6 +124,22 @@ function cargarBaseDeDatos() {
       datos.onlineTribe = null;
     }
 
+    if (!datos.caHistorial) {
+      datos.caHistorial = { servers: [], panel: null };
+    }
+
+    if (!Array.isArray(datos.caHistorial.servers)) {
+      datos.caHistorial.servers = [];
+    }
+
+    if (!datos.spot) {
+      datos.spot = { cueva: "", mapa: "", server: "", panel: null };
+    }
+
+    if (!datos.nextWipe) {
+      datos.nextWipe = { fecha: "", server: "", panel: null };
+    }
+
     return datos;
 
   } catch (error) {
@@ -110,7 +150,10 @@ function cargarBaseDeDatos() {
 
     return {
       players: {},
-      onlineTribe: null
+      onlineTribe: null,
+      caHistorial: { servers: [], panel: null },
+      spot: { cueva: "", mapa: "", server: "", panel: null },
+      nextWipe: { fecha: "", server: "", panel: null }
     };
   }
 }
@@ -320,6 +363,206 @@ function formatearHorasOnline(
       minutosRestantes
     ).padStart(2, "0")}m`
   );
+}
+
+function obtenerColorEmbed(
+  color
+) {
+  const colorLimpio =
+    String(
+      color ||
+      ""
+    )
+      .trim()
+      .replace(
+        /^#/,
+        ""
+      );
+
+  if (
+    !/^[0-9a-fA-F]{6}$/.test(
+      colorLimpio
+    )
+  ) {
+    return null;
+  }
+
+  return Number.parseInt(
+    colorLimpio,
+    16
+  );
+}
+
+function esImagenAdjunta(
+  archivo
+) {
+  return Boolean(
+    archivo?.url &&
+    archivo?.contentType?.startsWith(
+      "image/"
+    )
+  );
+}
+
+function obtenerUrlValida(
+  valor
+) {
+  const texto =
+    String(
+      valor ||
+      ""
+    ).trim();
+
+  if (
+    !texto
+  ) {
+    return null;
+  }
+
+  try {
+    const url =
+      new URL(
+        texto
+      );
+
+    if (
+      url.protocol !==
+        "http:" &&
+      url.protocol !==
+        "https:"
+    ) {
+      return null;
+    }
+
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function crearEmbedPanel(
+  titulo,
+  descripcion,
+  imagenArriba = PANEL_THUMBNAIL,
+  imagenAbajo = PANEL_IMAGE,
+  imagenPequena = PANEL_THUMBNAIL
+) {
+  return new EmbedBuilder()
+    .setColor(0xffffff)
+    .setTitle(titulo)
+    .setDescription(descripcion)
+    .setThumbnail(imagenArriba)
+    .setImage(imagenAbajo)
+    .setFooter({
+      text: "Cluster Alpha",
+      iconURL: imagenPequena
+    })
+    .setTimestamp();
+}
+
+function crearHistorialEmbed(imagenes = {}) {
+  const servidores = database.caHistorial.servers;
+  const texto = servidores.length
+    ? servidores.map((item, indice) =>
+        `**${indice + 1}. ${item.server}**\n` +
+        `⭐ Puntos: **${item.puntos}**\n` +
+        `🏠 Vivíamos en: ${item.vivienda}`
+      ).join("\n\n")
+    : "Todavía no hay servidores registrados.";
+
+  return crearEmbedPanel(
+    "📚 Historial — Cluster Alpha",
+    texto,
+    imagenes.arriba,
+    imagenes.abajo,
+    imagenes.pequena
+  );
+}
+
+function crearSpotEmbed(imagenes = {}) {
+  const spot = database.spot;
+  return crearEmbedPanel(
+    "📍 Spot actual — Cluster Alpha",
+    `🏠 **Cueva:** ${spot.cueva || "Sin configurar"}\n` +
+    `🗺️ **Mapa:** ${spot.mapa || "Sin configurar"}\n` +
+    `🖥️ **Server:** ${spot.server || "Sin configurar"}`,
+    imagenes.arriba,
+    imagenes.abajo,
+    imagenes.pequena
+  );
+}
+
+function crearNextWipeEmbed(imagenes = {}) {
+  const wipe = database.nextWipe;
+  return crearEmbedPanel(
+    "⏭️ Next wipe — Cluster Alpha",
+    `📅 **Próximo wipe:** ${wipe.fecha || "Sin configurar"}\n` +
+    `🖥️ **Próximo server:** ${wipe.server || "Sin configurar"}`,
+    imagenes.arriba,
+    imagenes.abajo,
+    imagenes.pequena
+  );
+}
+
+function obtenerImagenesDesdeFormulario(interaction, customId) {
+  const texto = interaction.fields.getTextInputValue(customId);
+  const urls = texto
+    .split(/\r?\n/)
+    .map(url => obtenerUrlValida(url))
+    .filter(Boolean);
+
+  const lineas = texto
+    .split(/\r?\n/)
+    .map(url => url.trim())
+    .filter(Boolean);
+
+  if (lineas.length > 3 || urls.length !== lineas.length) {
+    return null;
+  }
+
+  return {
+    arriba: urls[0] || PANEL_THUMBNAIL,
+    abajo: urls[1] || PANEL_IMAGE,
+    pequena: urls[2] || PANEL_THUMBNAIL
+  };
+}
+
+async function fijarPanel(interaction, tipo, embed) {
+  const canal = interaction.channel;
+
+  if (!canal || !canal.isTextBased()) {
+    return {
+      ok: false,
+      mensaje: "No puedo fijar el panel en este canal."
+    };
+  }
+
+  const configuracion = database[tipo];
+  let mensaje = null;
+
+  if (configuracion.panel?.channelId === canal.id &&
+      configuracion.panel?.messageId) {
+    mensaje = await canal.messages.fetch(
+      configuracion.panel.messageId
+    ).catch(() => null);
+  }
+
+  if (mensaje) {
+    await mensaje.edit({ embeds: [embed] });
+  } else {
+    mensaje = await canal.send({ embeds: [embed] });
+  }
+
+  // Mantiene el panel visible en los mensajes fijados del canal.
+  await mensaje.pin().catch(() => {});
+
+  configuracion.panel = {
+    channelId: canal.id,
+    messageId: mensaje.id
+  };
+
+  guardarBaseDeDatos();
+  return { ok: true };
 }
 
 // ==========================================
@@ -554,7 +797,7 @@ function crearOnlineTribeEmbed() {
 
   const embed =
     new EmbedBuilder()
-      .setColor(0x8b5cf6)
+      .setColor(0xffffff)
       .setTitle(
         "🎮 ONLINE TRIBE"
       )
@@ -973,20 +1216,12 @@ function crearPerformanceEmbed(
 
   const embed =
     new EmbedBuilder()
-      .setColor(
-        jugador.online === true
-          ? 0x22c55e
-          : 0x8b5cf6
-      )
+      .setColor(0xffffff)
       .setTitle(
         `📊 Performance — ${jugador.nombre}`
       )
       .setThumbnail(
-        jugador.foto ||
-        usuario.displayAvatarURL({
-          extension: "png",
-          size: 256
-        })
+        PERFORMANCE_GIF
       )
       .addFields(
 
@@ -1413,7 +1648,32 @@ const comandos = [
     )
     .setDescription(
       "Crea o actualiza el panel fijo de jugadores online"
+    ),
+
+  new SlashCommandBuilder()
+    .setName(
+      "embed"
     )
+    .setDescription(
+      "Abre un formulario para crear un embed"
+    ),
+
+  new SlashCommandBuilder()
+    .setName("ca")
+    .setDescription("Paneles de Cluster Alpha")
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("historial")
+        .setDescription("Añade o actualiza un servidor del historial")
+    ),
+
+  new SlashCommandBuilder()
+    .setName("spot")
+    .setDescription("Configura la cueva, mapa y server actuales"),
+
+  new SlashCommandBuilder()
+    .setName("next-wipe")
+    .setDescription("Configura la fecha del próximo wipe y el server"),
 
 ].map(
   comando =>
@@ -1481,6 +1741,475 @@ client.on(
   async interaction => {
 
     try {
+
+      // ========================================
+      // PANELES DE CLUSTER ALPHA
+      // ========================================
+
+      if (
+        interaction.isChatInputCommand() &&
+        (
+          interaction.commandName === "spot" ||
+          interaction.commandName === "next-wipe" ||
+          (
+            interaction.commandName === "ca" &&
+            interaction.options.getSubcommand() === "historial"
+          )
+        )
+      ) {
+        if (!esOwner(interaction)) {
+          return interaction.reply({
+            content: "Solo el owner o el rol owner puede modificar estos paneles.",
+            ephemeral: true
+          });
+        }
+
+        const comandoPanel =
+          interaction.commandName === "ca"
+            ? "ca-historial"
+            : interaction.commandName;
+        const modal = new ModalBuilder()
+          .setCustomId(`formulario-${comandoPanel}`)
+          .setTitle(
+            comandoPanel === "ca-historial"
+              ? "Historial de Cluster Alpha"
+              : comandoPanel === "spot"
+                ? "Spot actual"
+                : "Próximo wipe"
+          );
+
+        const campos = comandoPanel === "ca-historial"
+          ? [
+              ["historial-server", "Server", "Ej: Cluster Alpha 001", true],
+              ["historial-puntos", "Puntos", "Ej: 1250", true],
+              ["historial-vivienda", "Dónde vivíamos", "Ej: Cueva de nieve", true],
+              ["panel-imagenes", "Imágenes (3 URLs, una por línea)", "Arriba\nGrande abajo\nPequeña abajo", false]
+            ]
+          : comandoPanel === "spot"
+            ? [
+                ["spot-cueva", "Cueva", "Nombre o coordenadas de la cueva", true],
+                ["spot-mapa", "Mapa", "Ej: Fjordur", true],
+                ["spot-server", "Server", "Ej: Cluster Alpha 001", true],
+                ["panel-imagenes", "Imágenes (3 URLs, una por línea)", "Arriba\nGrande abajo\nPequeña abajo", false]
+              ]
+            : [
+                ["wipe-fecha", "Cuándo será", "Ej: 30 de agosto a las 20:00", true],
+                ["wipe-server", "Próximo server", "Ej: Cluster Alpha 002", true],
+                ["panel-imagenes", "Imágenes (3 URLs, una por línea)", "Arriba\nGrande abajo\nPequeña abajo", false]
+              ];
+
+        modal.addComponents(
+          ...campos.map(([customId, label, placeholder, required]) =>
+            new ActionRowBuilder().addComponents(
+              new TextInputBuilder()
+                .setCustomId(customId)
+                .setLabel(label)
+                .setPlaceholder(placeholder)
+                .setStyle(
+                  customId === "historial-vivienda" ||
+                  customId === "spot-cueva" ||
+                  customId === "panel-imagenes"
+                    ? TextInputStyle.Paragraph
+                    : TextInputStyle.Short
+                )
+                .setMaxLength(1000)
+                .setRequired(required)
+            )
+          )
+        );
+
+        return interaction.showModal(modal);
+      }
+
+      if (interaction.isModalSubmit()) {
+        if (
+          [
+            "formulario-ca-historial",
+            "formulario-spot",
+            "formulario-next-wipe"
+          ].includes(interaction.customId) &&
+          !esOwner(interaction)
+        ) {
+          return interaction.reply({
+            content: "Solo el owner o el rol owner puede modificar estos paneles.",
+            ephemeral: true
+          });
+        }
+
+        if (interaction.customId === "formulario-ca-historial") {
+          const server = interaction.fields.getTextInputValue(
+            "historial-server"
+          ).trim();
+          const puntos = interaction.fields.getTextInputValue(
+            "historial-puntos"
+          ).trim();
+          const vivienda = interaction.fields.getTextInputValue(
+            "historial-vivienda"
+          ).trim();
+          const imagenes = obtenerImagenesDesdeFormulario(
+            interaction,
+            "panel-imagenes"
+          );
+
+          if (!imagenes) {
+            return interaction.reply({
+              content: "Las imágenes deben ser hasta 3 URLs válidas, una por línea.",
+              ephemeral: true
+            });
+          }
+
+          const existente = database.caHistorial.servers.find(
+            item => item.server.toLowerCase() === server.toLowerCase()
+          );
+
+          if (existente) {
+            existente.puntos = puntos;
+            existente.vivienda = vivienda;
+          } else {
+            database.caHistorial.servers.push({
+              server,
+              puntos,
+              vivienda
+            });
+          }
+
+          const resultado = await fijarPanel(
+            interaction,
+            "caHistorial",
+            crearHistorialEmbed(imagenes)
+          );
+
+          return interaction.reply({
+            content: resultado.ok
+              ? `✅ Servidor **${server}** ${existente ? "actualizado" : "añadido"} y panel fijado en este canal.`
+              : resultado.mensaje,
+            ephemeral: true
+          });
+        }
+
+        if (interaction.customId === "formulario-spot") {
+          database.spot.cueva = interaction.fields
+            .getTextInputValue("spot-cueva").trim();
+          database.spot.mapa = interaction.fields
+            .getTextInputValue("spot-mapa").trim();
+          database.spot.server = interaction.fields
+            .getTextInputValue("spot-server").trim();
+          const imagenes = obtenerImagenesDesdeFormulario(
+            interaction,
+            "panel-imagenes"
+          );
+
+          if (!imagenes) {
+            return interaction.reply({
+              content: "Las imágenes deben ser hasta 3 URLs válidas, una por línea.",
+              ephemeral: true
+            });
+          }
+
+          const resultado = await fijarPanel(
+            interaction,
+            "spot",
+            crearSpotEmbed(imagenes)
+          );
+
+          return interaction.reply({
+            content: resultado.ok
+              ? "✅ Spot actualizado y panel fijado en este canal."
+              : resultado.mensaje,
+            ephemeral: true
+          });
+        }
+
+        if (interaction.customId === "formulario-next-wipe") {
+          database.nextWipe.fecha = interaction.fields
+            .getTextInputValue("wipe-fecha").trim();
+          database.nextWipe.server = interaction.fields
+            .getTextInputValue("wipe-server").trim();
+          const imagenes = obtenerImagenesDesdeFormulario(
+            interaction,
+            "panel-imagenes"
+          );
+
+          if (!imagenes) {
+            return interaction.reply({
+              content: "Las imágenes deben ser hasta 3 URLs válidas, una por línea.",
+              ephemeral: true
+            });
+          }
+
+          const resultado = await fijarPanel(
+            interaction,
+            "nextWipe",
+            crearNextWipeEmbed(imagenes)
+          );
+
+          return interaction.reply({
+            content: resultado.ok
+              ? "✅ Next wipe actualizado y panel fijado en este canal."
+              : resultado.mensaje,
+            ephemeral: true
+          });
+        }
+      }
+
+      // ========================================
+      // FORMULARIO DE /EMBED
+      // ========================================
+
+      if (
+        interaction.isChatInputCommand() &&
+        interaction.commandName ===
+          "embed"
+      ) {
+        if (!esOwner(interaction)) {
+          return interaction.reply({
+            content: "Solo el owner o el rol owner puede crear embeds.",
+            ephemeral: true
+          });
+        }
+
+        const modal =
+          new ModalBuilder()
+            .setCustomId(
+              "formulario-embed"
+            )
+            .setTitle(
+              "Crear embed personalizado"
+            );
+
+        const titulo =
+          new TextInputBuilder()
+            .setCustomId(
+              "embed-titulo"
+            )
+            .setLabel(
+              "Título"
+            )
+            .setStyle(
+              TextInputStyle.Short
+            )
+            .setMaxLength(
+              256
+            )
+            .setRequired(
+              true
+            );
+
+        const descripcion =
+          new TextInputBuilder()
+            .setCustomId(
+              "embed-descripcion"
+            )
+            .setLabel(
+              "Descripción"
+            )
+            .setStyle(
+              TextInputStyle.Paragraph
+            )
+            .setMaxLength(
+              4096
+            )
+            .setRequired(
+              true
+            );
+
+        const imagenArriba =
+          new TextInputBuilder()
+            .setCustomId(
+              "embed-imagen-arriba"
+            )
+            .setLabel(
+              "Imagen pequeña arriba (URL)"
+            )
+            .setPlaceholder(
+              "https://ejemplo.com/imagen.png"
+            )
+            .setValue(PANEL_THUMBNAIL)
+            .setStyle(
+              TextInputStyle.Short
+            )
+            .setRequired(
+              false
+            );
+
+        const imagenAbajo =
+          new TextInputBuilder()
+            .setCustomId(
+              "embed-imagen-abajo"
+            )
+            .setLabel(
+              "Imagen grande abajo (URL)"
+            )
+            .setPlaceholder(
+              "https://ejemplo.com/imagen.png"
+            )
+            .setValue(PANEL_IMAGE)
+            .setStyle(
+              TextInputStyle.Short
+            )
+            .setRequired(
+              false
+            );
+
+        const imagenPequena =
+          new TextInputBuilder()
+            .setCustomId(
+              "embed-imagen-pequena"
+            )
+            .setLabel(
+              "Imagen pequeña abajo (URL)"
+            )
+            .setPlaceholder(
+              "https://ejemplo.com/imagen.png"
+            )
+            .setValue(
+              PANEL_THUMBNAIL
+            )
+            .setStyle(
+              TextInputStyle.Short
+            )
+            .setRequired(false);
+
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(
+            titulo
+          ),
+          new ActionRowBuilder().addComponents(
+            descripcion
+          ),
+          new ActionRowBuilder().addComponents(
+            imagenArriba
+          ),
+          new ActionRowBuilder().addComponents(
+            imagenAbajo
+          ),
+          new ActionRowBuilder().addComponents(
+            imagenPequena
+          )
+        );
+
+        return interaction.showModal(
+          modal
+        );
+      }
+
+      if (
+        interaction.isModalSubmit() &&
+        interaction.customId ===
+          "formulario-embed"
+      ) {
+        if (!esOwner(interaction)) {
+          return interaction.reply({
+            content: "Solo el owner o el rol owner puede crear embeds.",
+            ephemeral: true
+          });
+        }
+
+        const titulo =
+          interaction.fields.getTextInputValue(
+            "embed-titulo"
+          );
+
+        const descripcion =
+          interaction.fields.getTextInputValue(
+            "embed-descripcion"
+          );
+
+        const imagenArribaTexto =
+          interaction.fields.getTextInputValue(
+            "embed-imagen-arriba"
+          );
+
+        const imagenAbajoTexto =
+          interaction.fields.getTextInputValue(
+            "embed-imagen-abajo"
+          );
+
+        const imagenPequenaTexto =
+          interaction.fields.getTextInputValue(
+            "embed-imagen-pequena"
+          );
+
+        const color = 0xffffff;
+
+        const imagenArriba =
+          obtenerUrlValida(
+            imagenArribaTexto
+          );
+
+        const imagenAbajo =
+          obtenerUrlValida(
+            imagenAbajoTexto
+          );
+
+        const imagenPequena =
+          obtenerUrlValida(
+            imagenPequenaTexto
+          );
+
+        if (
+          (
+            imagenArribaTexto.trim() &&
+            !imagenArriba
+          ) ||
+          (
+            imagenAbajoTexto.trim() &&
+            !imagenAbajo
+          ) ||
+          (
+            imagenPequenaTexto.trim() &&
+            !imagenPequena
+          )
+        ) {
+          return interaction.reply({
+            content:
+              "Las imágenes deben ser URLs válidas que empiecen por `http://` o `https://`.",
+            ephemeral:
+              true
+          });
+        }
+
+        const embed =
+          new EmbedBuilder()
+            .setColor(
+              color
+            )
+            .setTitle(
+              titulo
+            )
+            .setDescription(
+              descripcion
+            );
+
+        if (
+          imagenArriba
+        ) {
+          embed.setThumbnail(
+            imagenArriba
+          );
+        }
+
+        if (
+          imagenAbajo
+        ) {
+          embed.setImage(
+            imagenAbajo
+          );
+        }
+
+        if (imagenPequena) {
+          embed.setFooter({
+            text: "Cluster Alpha",
+            iconURL: imagenPequena
+          });
+        }
+
+        return interaction.reply({
+          embeds: [
+            embed
+          ]
+        });
+      }
 
       // ========================================
       // SELECTOR DE /TRIBU
@@ -1560,7 +2289,12 @@ client.on(
         "registrar-stats",
         "subir-foto",
         "subir-captura",
-        "online-tribe"
+        "online-tribe",
+        "embed",
+        "ca",
+        "ca-historial",
+        "spot",
+        "next-wipe"
       ];
 
       if (
@@ -2120,7 +2854,7 @@ client.on(
         const embed =
           new EmbedBuilder()
             .setColor(
-              0x8b5cf6
+              0xffffff
             )
             .setTitle(
               "Performance de la tribu"
