@@ -51,7 +51,7 @@ const DATABASE_FILE = path.join(
 );
 
 const PERFORMANCE_GIF =
-  "https://cdn.discordapp.com/attachments/1541467260642664623/1541754421711470722/0824.gif?ex=6a8ebe32&is=6a8d6cb2&hm=f2c70feb1c047bda392c0623f157fc3c57a5970947de3b2a5bce3cbde8d35111&";
+  "https://cdn.discordapp.com/attachments/1541467260642664623/1541754421711470722/0824.gif";
 
 const PSN_NPSSO =
   process.env.PSN_NPSSO || "";
@@ -322,45 +322,6 @@ function formatearHorasOnline(
   );
 }
 
-function obtenerColorEmbed(
-  color
-) {
-  const colorLimpio =
-    String(
-      color ||
-      ""
-    )
-      .trim()
-      .replace(
-        /^#/,
-        ""
-      );
-
-  if (
-    !/^[0-9a-fA-F]{6}$/.test(
-      colorLimpio
-    )
-  ) {
-    return null;
-  }
-
-  return Number.parseInt(
-    colorLimpio,
-    16
-  );
-}
-
-function esImagenAdjunta(
-  archivo
-) {
-  return Boolean(
-    archivo?.url &&
-    archivo?.contentType?.startsWith(
-      "image/"
-    )
-  );
-}
-
 // ==========================================
 // PSN
 // ==========================================
@@ -593,7 +554,7 @@ function crearOnlineTribeEmbed() {
 
   const embed =
     new EmbedBuilder()
-      .setColor(0xffffff)
+      .setColor(0x8b5cf6)
       .setTitle(
         "🎮 ONLINE TRIBE"
       )
@@ -1012,12 +973,20 @@ function crearPerformanceEmbed(
 
   const embed =
     new EmbedBuilder()
-      .setColor(0xffffff)
+      .setColor(
+        jugador.online === true
+          ? 0x22c55e
+          : 0x8b5cf6
+      )
       .setTitle(
         `📊 Performance — ${jugador.nombre}`
       )
       .setThumbnail(
-        PERFORMANCE_GIF
+        jugador.foto ||
+        usuario.displayAvatarURL({
+          extension: "png",
+          size: 256
+        })
       )
       .addFields(
 
@@ -1444,85 +1413,6 @@ const comandos = [
     )
     .setDescription(
       "Crea o actualiza el panel fijo de jugadores online"
-    ),
-
-  new SlashCommandBuilder()
-    .setName(
-      "embed"
-    )
-    .setDescription(
-      "Publica un embed personalizado"
-    )
-    .addStringOption(
-      option =>
-        option
-          .setName(
-            "titulo"
-          )
-          .setDescription(
-            "Título del embed"
-          )
-          .setMaxLength(
-            256
-          )
-          .setRequired(
-            true
-          )
-    )
-    .addStringOption(
-      option =>
-        option
-          .setName(
-            "descripcion"
-          )
-          .setDescription(
-            "Descripción del embed"
-          )
-          .setMaxLength(
-            4096
-          )
-          .setRequired(
-            true
-          )
-    )
-    .addAttachmentOption(
-      option =>
-        option
-          .setName(
-            "imagen-arriba"
-          )
-          .setDescription(
-            "Imagen pequeña arriba a la derecha"
-          )
-          .setRequired(
-            false
-          )
-    )
-    .addAttachmentOption(
-      option =>
-        option
-          .setName(
-            "imagen-abajo"
-          )
-          .setDescription(
-            "Imagen grande debajo del texto"
-          )
-          .setRequired(
-            false
-          )
-    )
-    .addStringOption(
-      option =>
-        option
-          .setName(
-            "color"
-          )
-          .setDescription(
-            "Color hexadecimal, por ejemplo #5865F2"
-          )
-          .setRequired(
-            false
-          )
     )
 
 ].map(
@@ -1670,8 +1560,7 @@ client.on(
         "registrar-stats",
         "subir-foto",
         "subir-captura",
-        "online-tribe",
-        "embed"
+        "online-tribe"
       ];
 
       if (
@@ -2231,7 +2120,7 @@ client.on(
         const embed =
           new EmbedBuilder()
             .setColor(
-              0xffffff
+              0x8b5cf6
             )
             .setTitle(
               "Performance de la tribu"
@@ -2367,113 +2256,6 @@ client.on(
             "✅ **ONLINE TRIBE configurado correctamente.**\n\n" +
             "El mismo mensaje se actualizará automáticamente cada minuto.\n" +
             "Los nuevos jugadores vinculados aparecerán automáticamente."
-        });
-      }
-
-      // ========================================
-      // /EMBED
-      // ========================================
-
-      if (
-        comando ===
-        "embed"
-      ) {
-        const titulo =
-          interaction.options.getString(
-            "titulo"
-          );
-
-        const descripcion =
-          interaction.options.getString(
-            "descripcion"
-          );
-
-        const imagenArriba =
-          interaction.options.getAttachment(
-            "imagen-arriba"
-          );
-
-        const imagenAbajo =
-          interaction.options.getAttachment(
-            "imagen-abajo"
-          );
-
-        const colorTexto =
-          interaction.options.getString(
-            "color"
-          ) ||
-          "#5865F2";
-
-        const color =
-          obtenerColorEmbed(
-            colorTexto
-          );
-
-        if (
-          color === null
-        ) {
-          return interaction.reply({
-            content:
-              "El color debe ser hexadecimal válido, por ejemplo `#5865F2`.",
-            ephemeral:
-              true
-          });
-        }
-
-        if (
-          (
-            imagenArriba &&
-            !esImagenAdjunta(
-              imagenArriba
-            )
-          ) ||
-          (
-            imagenAbajo &&
-            !esImagenAdjunta(
-              imagenAbajo
-            )
-          )
-        ) {
-          return interaction.reply({
-            content:
-              "Las imágenes adjuntas deben ser archivos de imagen.",
-            ephemeral:
-              true
-          });
-        }
-
-        const embed =
-          new EmbedBuilder()
-            .setColor(
-              color
-            )
-            .setTitle(
-              titulo
-            )
-            .setDescription(
-              descripcion
-            );
-
-        if (
-          imagenArriba
-        ) {
-          embed.setThumbnail(
-            imagenArriba.url
-          );
-        }
-
-        if (
-          imagenAbajo
-        ) {
-          embed.setImage(
-            imagenAbajo.url
-          );
-        }
-
-        return interaction.reply({
-          embeds: [
-            embed
-          ]
         });
       }
 
