@@ -10,22 +10,28 @@ const {
   StringSelectMenuOptionBuilder
 } = require("discord.js");
 
-const fs = require("fs");
-const path = require("path");
+const fs = require("node:fs");
+const path = require("node:path");
 
-// ==================================================
+// ==========================================
 // CONFIGURACIÓN
-// ==================================================
+// ==========================================
 
 const TOKEN = process.env.DISCORD_TOKEN;
 
-const CLIENT_ID = "1505542169971392693";
-const GUILD_ID = "1541451682872037386";
-const OWNER_ID = "1541467158901694505";
+const CLIENT_ID =
+  process.env.CLIENT_ID || "1505542169971392693";
 
-// Si el rol se llama "owner", funcionará automáticamente.
-// También puedes indicar su ID en Railway.
-const OWNER_ROLE_ID = process.env.OWNER_ROLE_ID || "";
+const GUILD_ID =
+  process.env.GUILD_ID || "1541451682872037386";
+
+const OWNER_ID =
+  process.env.OWNER_ID || "1541467158901694505";
+
+// Si el rol se llama "owner", funcionará automáticamente
+const OWNER_ROLE_ID =
+  process.env.OWNER_ROLE_ID || "";
+
 const OWNER_ROLE_NAME = (
   process.env.OWNER_ROLE_NAME || "owner"
 ).toLowerCase();
@@ -35,16 +41,20 @@ const DATABASE_FILE = path.join(
   "ark-performance.json"
 );
 
+const PERFORMANCE_GIF =
+  "https://cdn.discordapp.com/attachments/1541467260642664623/1541754421711470722/0824.gif?ex=6a8ebe32&is=6a8d6cb2&hm=f2c70feb1c047bda392c0623f157fc3c57a5970947de3b2a5bce3cbde8d35111&";
+
 if (!TOKEN) {
   console.error(
     "ERROR: Falta la variable DISCORD_TOKEN en Railway."
   );
+
   process.exit(1);
 }
 
-// ==================================================
+// ==========================================
 // BASE DE DATOS
-// ==================================================
+// ==========================================
 
 function cargarBaseDeDatos() {
   try {
@@ -89,17 +99,17 @@ function guardarBaseDeDatos() {
 
 const database = cargarBaseDeDatos();
 
-// ==================================================
+// ==========================================
 // FUNCIONES AUXILIARES
-// ==================================================
+// ==========================================
 
 function esOwner(interaction) {
-  // El owner por ID siempre tiene permiso
+  // El owner por ID tiene permiso
   if (interaction.user.id === OWNER_ID) {
     return true;
   }
 
-  // También se permite el rol configurado
+  // También tiene permiso el rol configurado
   const roles = interaction.member?.roles?.cache;
 
   if (!roles) {
@@ -174,54 +184,71 @@ function calcularNota(stats) {
   );
 }
 
+function crearBarraDePerformance(nota) {
+  const bloquesLlenos = Math.max(
+    0,
+    Math.min(10, Math.round(nota))
+  );
+
+  const bloquesVacios = 10 - bloquesLlenos;
+
+  return (
+    "█".repeat(bloquesLlenos) +
+    "░".repeat(bloquesVacios)
+  );
+}
+
 function crearPerformanceEmbed(usuario, jugador) {
   const stats = obtenerStatsDeHoy(jugador);
   const nota = calcularNota(stats);
+  const barra = crearBarraDePerformance(nota);
 
   const embed = new EmbedBuilder()
     .setColor(0x8b5cf6)
     .setTitle(`Performance de ${jugador.nombre}`)
     .setDescription(
-      `📅 Fecha: **${obtenerFechaDeHoy()}**\n\n` +
-      `⭐ Nota general: **${nota}/10**`
+      `Fecha: **${obtenerFechaDeHoy()}**\n\n` +
+      `**Valoración: ${nota}/10**\n` +
+      `\`${barra}\``
     )
     .addFields(
       {
-        name: "🎮 PSN",
+        name: "PSN",
         value: jugador.psn || "No indicado",
-        inline: true
+        inline: false
       },
       {
-        name: "⏱️ Horas jugadas",
+        name: "Horas jugadas hoy",
         value: `${stats.horas} horas`,
-        inline: true
+        inline: false
       },
       {
-        name: "🛡️ Torretas rotas",
+        name: "Torretas rotas",
         value: `${stats.torretas}`,
-        inline: true
+        inline: false
       },
       {
-        name: "🦖 Dinos matados",
+        name: "Dinos matados",
         value: `${stats.dinos}`,
-        inline: true
+        inline: false
       },
       {
-        name: "⚔️ Jugadores matados",
+        name: "Jugadores matados",
         value: `${stats.jugadores}`,
-        inline: true
+        inline: false
       },
       {
-        name: "📌 Origen",
+        name: "Origen de los datos",
         value:
           stats.origen === "captura"
             ? "Captura subida"
-            : "Introducido manualmente",
-        inline: true
+            : "Introducidos manualmente",
+        inline: false
       }
     )
     .setFooter({
-      text: "ARK Tribe Performance"
+      text: "ARK Tribe Performance",
+      iconURL: PERFORMANCE_GIF
     })
     .setTimestamp();
 
@@ -243,9 +270,9 @@ function crearPerformanceEmbed(usuario, jugador) {
   return embed;
 }
 
-// ==================================================
-// COMANDOS SLASH
-// ==================================================
+// ==========================================
+// COMANDOS
+// ==========================================
 
 const comandos = [
   new SlashCommandBuilder()
@@ -283,7 +310,7 @@ const comandos = [
     .addNumberOption(option =>
       option
         .setName("cantidad")
-        .setDescription("Horas jugadas")
+        .setDescription("Cantidad de horas")
         .setMinValue(0)
         .setRequired(true)
     ),
@@ -355,7 +382,7 @@ const comandos = [
     .addAttachmentOption(option =>
       option
         .setName("captura")
-        .setDescription("Captura de estadísticas")
+        .setDescription("Captura de las estadísticas")
         .setRequired(true)
     ),
 
@@ -371,12 +398,12 @@ const comandos = [
 
   new SlashCommandBuilder()
     .setName("tribu")
-    .setDescription("Muestra el selector de jugadores")
+    .setDescription("Muestra todos los jugadores")
 ].map(comando => comando.toJSON());
 
-// ==================================================
+// ==========================================
 // REGISTRO DE COMANDOS
-// ==================================================
+// ==========================================
 
 async function registrarComandos() {
   const rest = new REST({
@@ -398,9 +425,9 @@ async function registrarComandos() {
   );
 }
 
-// ==================================================
+// ==========================================
 // CLIENTE DE DISCORD
-// ==================================================
+// ==========================================
 
 const client = new Client({
   intents: [
@@ -414,9 +441,9 @@ client.once("ready", () => {
   );
 });
 
-// ==================================================
+// ==========================================
 // INTERACCIONES
-// ==================================================
+// ==========================================
 
 client.on(
   "interactionCreate",
@@ -432,7 +459,7 @@ client.on(
 
         if (!jugador) {
           return interaction.reply({
-            content: "❌ Ese jugador no existe.",
+            content: "Ese jugador no existe.",
             ephemeral: true
           });
         }
@@ -458,7 +485,7 @@ client.on(
 
       const comando = interaction.commandName;
 
-      // Estos comandos solo son para owner o rol owner
+      // Estos comandos solo los usa el owner o el rol owner
       const comandosProtegidos = [
         "vincular",
         "horas",
@@ -473,14 +500,14 @@ client.on(
       ) {
         return interaction.reply({
           content:
-            "❌ Necesitas el ID del owner o el rol `owner` para usar este comando.",
+            "Solo el owner o el rol owner puede modificar los datos.",
           ephemeral: true
         });
       }
 
-      // ==========================================
+      // ========================================
       // /vincular
-      // ==========================================
+      // ========================================
 
       if (comando === "vincular") {
         const usuario =
@@ -525,14 +552,14 @@ client.on(
 
         return interaction.reply({
           content:
-            `✅ ${usuario} ha sido vinculado con PSN **${psn}**.`,
+            `${usuario} ha sido vinculado con PSN **${psn}**.`,
           ephemeral: true
         });
       }
 
-      // ==========================================
+      // ========================================
       // /horas
-      // ==========================================
+      // ========================================
 
       if (comando === "horas") {
         const usuario =
@@ -547,7 +574,7 @@ client.on(
         if (!jugador) {
           return interaction.reply({
             content:
-              "❌ Primero usa `/vincular` con ese jugador.",
+              "Primero vincula al jugador usando `/vincular`.",
             ephemeral: true
           });
         }
@@ -561,14 +588,14 @@ client.on(
 
         return interaction.reply({
           content:
-            `✅ Horas de **${jugador.nombre}** actualizadas a **${cantidad}**.`,
+            `Horas de **${jugador.nombre}** actualizadas a **${cantidad}**.`,
           ephemeral: true
         });
       }
 
-      // ==========================================
+      // ========================================
       // /registrar-stats
-      // ==========================================
+      // ========================================
 
       if (comando === "registrar-stats") {
         const usuario =
@@ -592,7 +619,7 @@ client.on(
         if (!jugador) {
           return interaction.reply({
             content:
-              "❌ Primero usa `/vincular` con ese jugador.",
+              "Primero vincula al jugador usando `/vincular`.",
             ephemeral: true
           });
         }
@@ -610,14 +637,14 @@ client.on(
 
         return interaction.reply({
           content:
-            `✅ Estadísticas de **${jugador.nombre}** guardadas.`,
+            `Estadísticas de **${jugador.nombre}** guardadas.`,
           ephemeral: true
         });
       }
 
-      // ==========================================
+      // ========================================
       // /subir-foto
-      // ==========================================
+      // ========================================
 
       if (comando === "subir-foto") {
         const usuario =
@@ -632,7 +659,7 @@ client.on(
         ) {
           return interaction.reply({
             content:
-              "❌ El archivo debe ser una imagen.",
+              "El archivo debe ser una imagen.",
             ephemeral: true
           });
         }
@@ -643,7 +670,7 @@ client.on(
         if (!jugador) {
           return interaction.reply({
             content:
-              "❌ Primero usa `/vincular` con ese jugador.",
+              "Primero vincula al jugador usando `/vincular`.",
             ephemeral: true
           });
         }
@@ -654,14 +681,14 @@ client.on(
 
         return interaction.reply({
           content:
-            `✅ Foto de **${jugador.nombre}** guardada.`,
+            `Foto de **${jugador.nombre}** guardada.`,
           ephemeral: true
         });
       }
 
-      // ==========================================
+      // ========================================
       // /subir-captura
-      // ==========================================
+      // ========================================
 
       if (comando === "subir-captura") {
         const usuario =
@@ -676,7 +703,7 @@ client.on(
         ) {
           return interaction.reply({
             content:
-              "❌ El archivo debe ser una imagen.",
+              "El archivo debe ser una imagen.",
             ephemeral: true
           });
         }
@@ -687,7 +714,7 @@ client.on(
         if (!jugador) {
           return interaction.reply({
             content:
-              "❌ Primero usa `/vincular` con ese jugador.",
+              "Primero vincula al jugador usando `/vincular`.",
             ephemeral: true
           });
         }
@@ -702,14 +729,14 @@ client.on(
 
         return interaction.reply({
           content:
-            `✅ Captura de **${jugador.nombre}** guardada.`,
+            `Captura de **${jugador.nombre}** guardada.`,
           ephemeral: true
         });
       }
 
-      // ==========================================
+      // ========================================
       // /performance
-      // ==========================================
+      // ========================================
 
       if (comando === "performance") {
         const usuario =
@@ -721,7 +748,7 @@ client.on(
         if (!jugador) {
           return interaction.reply({
             content:
-              "❌ Ese jugador todavía no está vinculado.",
+              "Ese jugador todavía no está vinculado.",
             ephemeral: true
           });
         }
@@ -736,9 +763,9 @@ client.on(
         });
       }
 
-      // ==========================================
+      // ========================================
       // /tribu
-      // ==========================================
+      // ========================================
 
       if (comando === "tribu") {
         const jugadores =
@@ -752,7 +779,7 @@ client.on(
         if (jugadores.length === 0) {
           return interaction.reply({
             content:
-              "❌ Todavía no hay jugadores vinculados.",
+              "Todavía no hay jugadores vinculados.",
             ephemeral: true
           });
         }
@@ -780,11 +807,15 @@ client.on(
           new EmbedBuilder()
             .setColor(0x8b5cf6)
             .setTitle(
-              "📊 Performance de la tribu"
+              "Performance de la tribu"
             )
             .setDescription(
-              "Selecciona un miembro para ver su ficha de hoy."
-            );
+              "Selecciona un miembro para ver todas sus estadísticas de hoy."
+            )
+            .setFooter({
+              text: "ARK Tribe Performance",
+              iconURL: PERFORMANCE_GIF
+            });
 
         return interaction.reply({
           embeds: [embed],
@@ -801,7 +832,7 @@ client.on(
 
       const respuesta = {
         content:
-          "❌ Ha ocurrido un error procesando el comando.",
+          "Ha ocurrido un error procesando el comando.",
         ephemeral: true
       };
 
@@ -819,20 +850,20 @@ client.on(
   }
 );
 
-// ==================================================
-// ARRANQUE DEL BOT
-// ==================================================
+// ==========================================
+// ARRANQUE
+// ==========================================
 
 registrarComandos()
   .then(() => {
     return client.login(TOKEN);
   })
   .then(() => {
-    console.log("✅ Inicio completado.");
+    console.log("Inicio completado.");
   })
   .catch(error => {
     console.error(
-      "❌ No se pudo iniciar el bot:",
+      "No se pudo iniciar el bot:",
       error
     );
 
