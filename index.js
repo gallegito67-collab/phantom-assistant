@@ -13,9 +13,9 @@ const {
 const fs = require("fs");
 const path = require("path");
 
-// ===============================
+// ==================================================
 // CONFIGURACIÓN
-// ===============================
+// ==================================================
 
 const TOKEN = process.env.DISCORD_TOKEN;
 
@@ -23,27 +23,52 @@ const CLIENT_ID = "1505542169971392693";
 const GUILD_ID = "1541451682872037386";
 const OWNER_ID = "1541467158901694505";
 
-const DATABASE_FILE = path.join(__dirname, "ark-performance.json");
+// Si el rol se llama "owner", funcionará automáticamente.
+// También puedes indicar su ID en Railway.
+const OWNER_ROLE_ID = process.env.OWNER_ROLE_ID || "";
+const OWNER_ROLE_NAME = (
+  process.env.OWNER_ROLE_NAME || "owner"
+).toLowerCase();
+
+const DATABASE_FILE = path.join(
+  __dirname,
+  "ark-performance.json"
+);
 
 if (!TOKEN) {
-  console.error("ERROR: Falta la variable DISCORD_TOKEN en Railway.");
+  console.error(
+    "ERROR: Falta la variable DISCORD_TOKEN en Railway."
+  );
   process.exit(1);
 }
 
-// ===============================
+// ==================================================
 // BASE DE DATOS
-// ===============================
+// ==================================================
 
 function cargarBaseDeDatos() {
   try {
     if (!fs.existsSync(DATABASE_FILE)) {
-      return { players: {} };
+      return {
+        players: {}
+      };
     }
 
-    return JSON.parse(fs.readFileSync(DATABASE_FILE, "utf8"));
+    const contenido = fs.readFileSync(
+      DATABASE_FILE,
+      "utf8"
+    );
+
+    return JSON.parse(contenido);
   } catch (error) {
-    console.error("Error leyendo la base de datos:", error);
-    return { players: {} };
+    console.error(
+      "Error cargando la base de datos:",
+      error
+    );
+
+    return {
+      players: {}
+    };
   }
 }
 
@@ -55,21 +80,45 @@ function guardarBaseDeDatos() {
       "utf8"
     );
   } catch (error) {
-    console.error("Error guardando la base de datos:", error);
+    console.error(
+      "Error guardando la base de datos:",
+      error
+    );
   }
 }
 
 const database = cargarBaseDeDatos();
 
-// ===============================
+// ==================================================
 // FUNCIONES AUXILIARES
-// ===============================
+// ==================================================
 
 function esOwner(interaction) {
-  return interaction.user.id === OWNER_ID;
+  // El owner por ID siempre tiene permiso
+  if (interaction.user.id === OWNER_ID) {
+    return true;
+  }
+
+  // También se permite el rol configurado
+  const roles = interaction.member?.roles?.cache;
+
+  if (!roles) {
+    return false;
+  }
+
+  return roles.some(role => {
+    const coincidePorId =
+      OWNER_ROLE_ID &&
+      role.id === OWNER_ROLE_ID;
+
+    const coincidePorNombre =
+      role.name.toLowerCase() === OWNER_ROLE_NAME;
+
+    return coincidePorId || coincidePorNombre;
+  });
 }
 
-function fechaDeHoy() {
+function obtenerFechaDeHoy() {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Europe/Madrid"
   }).format(new Date());
@@ -80,7 +129,7 @@ function obtenerJugador(discordId) {
 }
 
 function obtenerStatsDeHoy(jugador) {
-  const fecha = fechaDeHoy();
+  const fecha = obtenerFechaDeHoy();
 
   if (!jugador.daily) {
     jugador.daily = {};
@@ -102,8 +151,15 @@ function obtenerStatsDeHoy(jugador) {
 }
 
 function calcularNota(stats) {
-  if (stats.nota !== null && stats.nota !== undefined) {
-    return Math.max(1, Math.min(10, Number(stats.nota)));
+  if (
+    stats.nota !== null &&
+    stats.nota !== undefined &&
+    !Number.isNaN(Number(stats.nota))
+  ) {
+    return Math.max(
+      1,
+      Math.min(10, Number(stats.nota))
+    );
   }
 
   const puntos =
@@ -118,7 +174,7 @@ function calcularNota(stats) {
   );
 }
 
-function crearEmbedPerformance(usuario, jugador) {
+function crearPerformanceEmbed(usuario, jugador) {
   const stats = obtenerStatsDeHoy(jugador);
   const nota = calcularNota(stats);
 
@@ -126,7 +182,7 @@ function crearEmbedPerformance(usuario, jugador) {
     .setColor(0x8b5cf6)
     .setTitle(`Performance de ${jugador.nombre}`)
     .setDescription(
-      `📅 Fecha: **${fechaDeHoy()}**\n\n` +
+      `📅 Fecha: **${obtenerFechaDeHoy()}**\n\n` +
       `⭐ Nota general: **${nota}/10**`
     )
     .addFields(
@@ -156,11 +212,11 @@ function crearEmbedPerformance(usuario, jugador) {
         inline: true
       },
       {
-        name: "📌 Datos",
+        name: "📌 Origen",
         value:
           stats.origen === "captura"
-            ? "Leídos desde una captura"
-            : "Introducidos manualmente",
+            ? "Captura subida"
+            : "Introducido manualmente",
         inline: true
       }
     )
@@ -187,14 +243,14 @@ function crearEmbedPerformance(usuario, jugador) {
   return embed;
 }
 
-// ===============================
-// COMANDOS
-// ===============================
+// ==================================================
+// COMANDOS SLASH
+// ==================================================
 
 const comandos = [
   new SlashCommandBuilder()
     .setName("vincular")
-    .setDescription("Vincula un jugador de Discord con su PSN")
+    .setDescription("Vincula un jugador con su PSN")
     .addUserOption(option =>
       option
         .setName("jugador")
@@ -227,14 +283,14 @@ const comandos = [
     .addNumberOption(option =>
       option
         .setName("cantidad")
-        .setDescription("Número de horas")
+        .setDescription("Horas jugadas")
         .setMinValue(0)
         .setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("registrar-stats")
-    .setDescription("Registra las estadísticas de hoy")
+    .setDescription("Registra las estadísticas del día")
     .addUserOption(option =>
       option
         .setName("jugador")
@@ -273,7 +329,7 @@ const comandos = [
 
   new SlashCommandBuilder()
     .setName("subir-foto")
-    .setDescription("Sube la foto del jugador")
+    .setDescription("Sube la foto de un jugador")
     .addUserOption(option =>
       option
         .setName("jugador")
@@ -299,7 +355,7 @@ const comandos = [
     .addAttachmentOption(option =>
       option
         .setName("captura")
-        .setDescription("Captura del tribelog")
+        .setDescription("Captura de estadísticas")
         .setRequired(true)
     ),
 
@@ -318,341 +374,467 @@ const comandos = [
     .setDescription("Muestra el selector de jugadores")
 ].map(comando => comando.toJSON());
 
-// ===============================
-// REGISTRAR COMANDOS
-// ===============================
+// ==================================================
+// REGISTRO DE COMANDOS
+// ==================================================
 
 async function registrarComandos() {
-  const rest = new REST({ version: "10" }).setToken(TOKEN);
+  const rest = new REST({
+    version: "10"
+  }).setToken(TOKEN);
 
   await rest.put(
-    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+    Routes.applicationGuildCommands(
+      CLIENT_ID,
+      GUILD_ID
+    ),
     {
       body: comandos
     }
   );
 
-  console.log("✅ Comandos registrados correctamente.");
+  console.log(
+    `✅ ${comandos.length} comandos registrados.`
+  );
 }
 
-// ===============================
-// CLIENTE DISCORD
-// ===============================
+// ==================================================
+// CLIENTE DE DISCORD
+// ==================================================
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
+  intents: [
+    GatewayIntentBits.Guilds
+  ]
 });
 
 client.once("ready", () => {
-  console.log(`✅ Bot conectado como ${client.user.tag}`);
+  console.log(
+    `✅ Bot conectado como ${client.user.tag}`
+  );
 });
 
-client.on("interactionCreate", async interaction => {
-  try {
-    // Selector /tribu
-    if (
-      interaction.isStringSelectMenu() &&
-      interaction.customId === "selector-performance"
-    ) {
-      const jugador = obtenerJugador(interaction.values[0]);
+// ==================================================
+// INTERACCIONES
+// ==================================================
 
-      if (!jugador) {
+client.on(
+  "interactionCreate",
+  async interaction => {
+    try {
+      // Selector del comando /tribu
+      if (
+        interaction.isStringSelectMenu() &&
+        interaction.customId === "selector-performance"
+      ) {
+        const discordId = interaction.values[0];
+        const jugador = obtenerJugador(discordId);
+
+        if (!jugador) {
+          return interaction.reply({
+            content: "❌ Ese jugador no existe.",
+            ephemeral: true
+          });
+        }
+
+        const usuario = await client.users
+          .fetch(discordId)
+          .catch(() => null);
+
         return interaction.reply({
-          content: "Ese jugador ya no existe.",
+          embeds: [
+            crearPerformanceEmbed(
+              usuario,
+              jugador
+            )
+          ],
           ephemeral: true
         });
       }
 
-      const usuario = await client.users
-        .fetch(interaction.values[0])
-        .catch(() => null);
+      if (!interaction.isChatInputCommand()) {
+        return;
+      }
 
-      return interaction.reply({
-        embeds: [
-          crearEmbedPerformance(usuario, jugador)
-        ],
-        ephemeral: true
-      });
-    }
+      const comando = interaction.commandName;
 
-    if (!interaction.isChatInputCommand()) {
-      return;
-    }
+      // Estos comandos solo son para owner o rol owner
+      const comandosProtegidos = [
+        "vincular",
+        "horas",
+        "registrar-stats",
+        "subir-foto",
+        "subir-captura"
+      ];
 
-    const comando = interaction.commandName;
+      if (
+        comandosProtegidos.includes(comando) &&
+        !esOwner(interaction)
+      ) {
+        return interaction.reply({
+          content:
+            "❌ Necesitas el ID del owner o el rol `owner` para usar este comando.",
+          ephemeral: true
+        });
+      }
 
-    const comandosDeOwner = [
-      "vincular",
-      "horas",
-      "registrar-stats",
-      "subir-foto",
-      "subir-captura"
-    ];
+      // ==========================================
+      // /vincular
+      // ==========================================
 
-    if (
-      comandosDeOwner.includes(comando) &&
-      !esOwner(interaction)
-    ) {
-      return interaction.reply({
+      if (comando === "vincular") {
+        const usuario =
+          interaction.options.getUser("jugador");
+
+        const psn =
+          interaction.options.getString("psn");
+
+        const horas =
+          interaction.options.getNumber("horas");
+
+        const jugadorAnterior =
+          obtenerJugador(usuario.id);
+
+        database.players[usuario.id] = {
+          nombre:
+            usuario.globalName ||
+            usuario.username,
+
+          psn,
+
+          foto:
+            jugadorAnterior?.foto ||
+            usuario.displayAvatarURL({
+              extension: "png",
+              size: 256
+            }),
+
+          daily:
+            jugadorAnterior?.daily || {}
+        };
+
+        if (horas !== null) {
+          const stats = obtenerStatsDeHoy(
+            database.players[usuario.id]
+          );
+
+          stats.horas = horas;
+        }
+
+        guardarBaseDeDatos();
+
+        return interaction.reply({
+          content:
+            `✅ ${usuario} ha sido vinculado con PSN **${psn}**.`,
+          ephemeral: true
+        });
+      }
+
+      // ==========================================
+      // /horas
+      // ==========================================
+
+      if (comando === "horas") {
+        const usuario =
+          interaction.options.getUser("jugador");
+
+        const cantidad =
+          interaction.options.getNumber("cantidad");
+
+        const jugador =
+          obtenerJugador(usuario.id);
+
+        if (!jugador) {
+          return interaction.reply({
+            content:
+              "❌ Primero usa `/vincular` con ese jugador.",
+            ephemeral: true
+          });
+        }
+
+        const stats =
+          obtenerStatsDeHoy(jugador);
+
+        stats.horas = cantidad;
+
+        guardarBaseDeDatos();
+
+        return interaction.reply({
+          content:
+            `✅ Horas de **${jugador.nombre}** actualizadas a **${cantidad}**.`,
+          ephemeral: true
+        });
+      }
+
+      // ==========================================
+      // /registrar-stats
+      // ==========================================
+
+      if (comando === "registrar-stats") {
+        const usuario =
+          interaction.options.getUser("jugador");
+
+        const torretas =
+          interaction.options.getInteger("torretas");
+
+        const dinos =
+          interaction.options.getInteger("dinos");
+
+        const jugadores =
+          interaction.options.getInteger("jugadores");
+
+        const nota =
+          interaction.options.getInteger("nota");
+
+        const jugador =
+          obtenerJugador(usuario.id);
+
+        if (!jugador) {
+          return interaction.reply({
+            content:
+              "❌ Primero usa `/vincular` con ese jugador.",
+            ephemeral: true
+          });
+        }
+
+        const stats =
+          obtenerStatsDeHoy(jugador);
+
+        stats.torretas = torretas;
+        stats.dinos = dinos;
+        stats.jugadores = jugadores;
+        stats.nota = nota;
+        stats.origen = "manual";
+
+        guardarBaseDeDatos();
+
+        return interaction.reply({
+          content:
+            `✅ Estadísticas de **${jugador.nombre}** guardadas.`,
+          ephemeral: true
+        });
+      }
+
+      // ==========================================
+      // /subir-foto
+      // ==========================================
+
+      if (comando === "subir-foto") {
+        const usuario =
+          interaction.options.getUser("jugador");
+
+        const archivo =
+          interaction.options.getAttachment("foto");
+
+        if (
+          !archivo.contentType ||
+          !archivo.contentType.startsWith("image/")
+        ) {
+          return interaction.reply({
+            content:
+              "❌ El archivo debe ser una imagen.",
+            ephemeral: true
+          });
+        }
+
+        const jugador =
+          obtenerJugador(usuario.id);
+
+        if (!jugador) {
+          return interaction.reply({
+            content:
+              "❌ Primero usa `/vincular` con ese jugador.",
+            ephemeral: true
+          });
+        }
+
+        jugador.foto = archivo.url;
+
+        guardarBaseDeDatos();
+
+        return interaction.reply({
+          content:
+            `✅ Foto de **${jugador.nombre}** guardada.`,
+          ephemeral: true
+        });
+      }
+
+      // ==========================================
+      // /subir-captura
+      // ==========================================
+
+      if (comando === "subir-captura") {
+        const usuario =
+          interaction.options.getUser("jugador");
+
+        const archivo =
+          interaction.options.getAttachment("captura");
+
+        if (
+          !archivo.contentType ||
+          !archivo.contentType.startsWith("image/")
+        ) {
+          return interaction.reply({
+            content:
+              "❌ El archivo debe ser una imagen.",
+            ephemeral: true
+          });
+        }
+
+        const jugador =
+          obtenerJugador(usuario.id);
+
+        if (!jugador) {
+          return interaction.reply({
+            content:
+              "❌ Primero usa `/vincular` con ese jugador.",
+            ephemeral: true
+          });
+        }
+
+        const stats =
+          obtenerStatsDeHoy(jugador);
+
+        stats.captura = archivo.url;
+        stats.origen = "captura";
+
+        guardarBaseDeDatos();
+
+        return interaction.reply({
+          content:
+            `✅ Captura de **${jugador.nombre}** guardada.`,
+          ephemeral: true
+        });
+      }
+
+      // ==========================================
+      // /performance
+      // ==========================================
+
+      if (comando === "performance") {
+        const usuario =
+          interaction.options.getUser("jugador");
+
+        const jugador =
+          obtenerJugador(usuario.id);
+
+        if (!jugador) {
+          return interaction.reply({
+            content:
+              "❌ Ese jugador todavía no está vinculado.",
+            ephemeral: true
+          });
+        }
+
+        return interaction.reply({
+          embeds: [
+            crearPerformanceEmbed(
+              usuario,
+              jugador
+            )
+          ]
+        });
+      }
+
+      // ==========================================
+      // /tribu
+      // ==========================================
+
+      if (comando === "tribu") {
+        const jugadores =
+          Object.entries(database.players)
+            .slice(0, 25)
+            .map(([id, jugador]) => ({
+              id,
+              nombre: jugador.nombre
+            }));
+
+        if (jugadores.length === 0) {
+          return interaction.reply({
+            content:
+              "❌ Todavía no hay jugadores vinculados.",
+            ephemeral: true
+          });
+        }
+
+        const menu =
+          new StringSelectMenuBuilder()
+            .setCustomId("selector-performance")
+            .setPlaceholder(
+              "Selecciona un jugador"
+            )
+            .addOptions(
+              jugadores.map(jugador =>
+                new StringSelectMenuOptionBuilder()
+                  .setLabel(
+                    jugador.nombre.slice(0, 100)
+                  )
+                  .setValue(jugador.id)
+                  .setDescription(
+                    "Ver performance de hoy"
+                  )
+              )
+            );
+
+        const embed =
+          new EmbedBuilder()
+            .setColor(0x8b5cf6)
+            .setTitle(
+              "📊 Performance de la tribu"
+            )
+            .setDescription(
+              "Selecciona un miembro para ver su ficha de hoy."
+            );
+
+        return interaction.reply({
+          embeds: [embed],
+          components: [
+            new ActionRowBuilder().addComponents(menu)
+          ]
+        });
+      }
+    } catch (error) {
+      console.error(
+        "Error procesando interacción:",
+        error
+      );
+
+      const respuesta = {
         content:
-          "❌ Solo el owner puede modificar los datos.",
+          "❌ Ha ocurrido un error procesando el comando.",
         ephemeral: true
-      });
-    }
-
-    // /vincular
-    if (comando === "vincular") {
-      const usuario = interaction.options.getUser("jugador");
-      const psn = interaction.options.getString("psn");
-      const horas = interaction.options.getNumber("horas");
-
-      const anterior = obtenerJugador(usuario.id);
-
-      database.players[usuario.id] = {
-        nombre: usuario.globalName || usuario.username,
-        psn,
-        foto:
-          anterior?.foto ||
-          usuario.displayAvatarURL({
-            extension: "png",
-            size: 256
-          }),
-        daily: anterior?.daily || {}
       };
 
-      if (horas !== null) {
-        const stats = obtenerStatsDeHoy(
-          database.players[usuario.id]
-        );
-
-        stats.horas = horas;
+      if (
+        interaction.replied ||
+        interaction.deferred
+      ) {
+        await interaction.followUp(respuesta)
+          .catch(() => {});
+      } else {
+        await interaction.reply(respuesta)
+          .catch(() => {});
       }
-
-      guardarBaseDeDatos();
-
-      return interaction.reply({
-        content:
-          `✅ ${usuario} vinculado con PSN **${psn}**.`,
-        ephemeral: true
-      });
-    }
-
-    // /horas
-    if (comando === "horas") {
-      const usuario = interaction.options.getUser("jugador");
-      const cantidad = interaction.options.getNumber("cantidad");
-      const jugador = obtenerJugador(usuario.id);
-
-      if (!jugador) {
-        return interaction.reply({
-          content:
-            "❌ Primero usa `/vincular` con ese jugador.",
-          ephemeral: true
-        });
-      }
-
-      const stats = obtenerStatsDeHoy(jugador);
-      stats.horas = cantidad;
-
-      guardarBaseDeDatos();
-
-      return interaction.reply({
-        content:
-          `✅ Horas de **${jugador.nombre}** actualizadas a **${cantidad}**.`,
-        ephemeral: true
-      });
-    }
-
-    // /registrar-stats
-    if (comando === "registrar-stats") {
-      const usuario = interaction.options.getUser("jugador");
-      const torretas = interaction.options.getInteger("torretas");
-      const dinos = interaction.options.getInteger("dinos");
-      const jugadores = interaction.options.getInteger("jugadores");
-      const nota = interaction.options.getInteger("nota");
-
-      const jugador = obtenerJugador(usuario.id);
-
-      if (!jugador) {
-        return interaction.reply({
-          content:
-            "❌ Primero usa `/vincular` con ese jugador.",
-          ephemeral: true
-        });
-      }
-
-      const stats = obtenerStatsDeHoy(jugador);
-
-      stats.torretas = torretas;
-      stats.dinos = dinos;
-      stats.jugadores = jugadores;
-      stats.nota = nota;
-      stats.origen = "manual";
-
-      guardarBaseDeDatos();
-
-      return interaction.reply({
-        content:
-          `✅ Estadísticas de **${jugador.nombre}** guardadas.`,
-        ephemeral: true
-      });
-    }
-
-    // /subir-foto
-    if (comando === "subir-foto") {
-      const usuario = interaction.options.getUser("jugador");
-      const archivo = interaction.options.getAttachment("foto");
-
-      if (!archivo.contentType?.startsWith("image/")) {
-        return interaction.reply({
-          content: "❌ El archivo debe ser una imagen.",
-          ephemeral: true
-        });
-      }
-
-      const jugador = obtenerJugador(usuario.id);
-
-      if (!jugador) {
-        return interaction.reply({
-          content:
-            "❌ Primero usa `/vincular` con ese jugador.",
-          ephemeral: true
-        });
-      }
-
-      jugador.foto = archivo.url;
-      guardarBaseDeDatos();
-
-      return interaction.reply({
-        content:
-          `✅ Foto de **${jugador.nombre}** guardada.`,
-        ephemeral: true
-      });
-    }
-
-    // /subir-captura
-    if (comando === "subir-captura") {
-      const usuario = interaction.options.getUser("jugador");
-      const archivo =
-        interaction.options.getAttachment("captura");
-
-      if (!archivo.contentType?.startsWith("image/")) {
-        return interaction.reply({
-          content: "❌ El archivo debe ser una imagen.",
-          ephemeral: true
-        });
-      }
-
-      const jugador = obtenerJugador(usuario.id);
-
-      if (!jugador) {
-        return interaction.reply({
-          content:
-            "❌ Primero usa `/vincular` con ese jugador.",
-          ephemeral: true
-        });
-      }
-
-      const stats = obtenerStatsDeHoy(jugador);
-      stats.captura = archivo.url;
-      stats.origen = "captura";
-
-      guardarBaseDeDatos();
-
-      return interaction.reply({
-        content:
-          `✅ Captura de **${jugador.nombre}** guardada.`,
-        ephemeral: true
-      });
-    }
-
-    // /performance
-    if (comando === "performance") {
-      const usuario = interaction.options.getUser("jugador");
-      const jugador = obtenerJugador(usuario.id);
-
-      if (!jugador) {
-        return interaction.reply({
-          content:
-            "❌ Ese jugador todavía no está vinculado.",
-          ephemeral: true
-        });
-      }
-
-      return interaction.reply({
-        embeds: [
-          crearEmbedPerformance(usuario, jugador)
-        ]
-      });
-    }
-
-    // /tribu
-    if (comando === "tribu") {
-      const jugadores = Object.entries(database.players)
-        .slice(0, 25)
-        .map(([id, jugador]) => ({
-          id,
-          nombre: jugador.nombre
-        }));
-
-      if (jugadores.length === 0) {
-        return interaction.reply({
-          content:
-            "❌ Todavía no hay jugadores vinculados.",
-          ephemeral: true
-        });
-      }
-
-      const menu = new StringSelectMenuBuilder()
-        .setCustomId("selector-performance")
-        .setPlaceholder("Selecciona un jugador")
-        .addOptions(
-          jugadores.map(jugador =>
-            new StringSelectMenuOptionBuilder()
-              .setLabel(jugador.nombre.slice(0, 100))
-              .setValue(jugador.id)
-              .setDescription("Ver su performance de hoy")
-          )
-        );
-
-      const embed = new EmbedBuilder()
-        .setColor(0x8b5cf6)
-        .setTitle("📊 Performance de la tribu")
-        .setDescription(
-          "Selecciona un miembro para ver su foto y sus estadísticas."
-        );
-
-      return interaction.reply({
-        embeds: [embed],
-        components: [
-          new ActionRowBuilder().addComponents(menu)
-        ]
-      });
-    }
-  } catch (error) {
-    console.error("Error procesando interacción:", error);
-
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({
-        content: "❌ Ha ocurrido un error.",
-        ephemeral: true
-      }).catch(() => {});
-    } else {
-      await interaction.reply({
-        content: "❌ Ha ocurrido un error.",
-        ephemeral: true
-      }).catch(() => {});
     }
   }
-});
+);
 
-// ===============================
-// ARRANQUE
-// ===============================
+// ==================================================
+// ARRANQUE DEL BOT
+// ==================================================
 
 registrarComandos()
-  .then(() => client.login(TOKEN))
+  .then(() => {
+    return client.login(TOKEN);
+  })
+  .then(() => {
+    console.log("✅ Inicio completado.");
+  })
   .catch(error => {
-    console.error("No se pudo arrancar el bot:", error);
+    console.error(
+      "❌ No se pudo iniciar el bot:",
+      error
+    );
+
     process.exit(1);
   });
