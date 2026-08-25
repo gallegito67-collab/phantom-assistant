@@ -1,390 +1,751 @@
-// ============================================================
-//  EXTRACTED FUNCTIONS — AI + ORDER STATUS
-//  Original file: index_(28)_1779048884980.js
-// ============================================================
+/**
+ * Bot de rendimiento ARK
+ *
+ * Instalación:
+ * npm install discord.js
+ *
+ * Variables:
+ * DISCORD_TOKEN
+ * OPENAI_API_KEY        Opcional, para analizar capturas
+ */
 
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const https = require('https');
+const {
+  Client,
+  GatewayIntentBits,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+  EmbedBuilder,
+  ActionRowBuilder,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
+} = require("discord.js");
 
-// ─── CONFIG CONSTANTS (needed by these functions) ────────────
-const TOKEN            = 'MTUwNTU0MjE2OTk3MTM5MjY5Mw.GDrtAV.61o_aL860p-ZIHkyCp89MCeVCcRnObrMd7rkHE';
-const CLIENT_ID        = '1490472923545469040';
-const OWNER_ID         = '1401115138915831872';
-const ORDER_CHANNEL_ID = '1484941433411731616';
-const ORDER_FORM_CHANNEL_ID = '1503511199747280968';
-const OPENAI_API_KEY   = ''; // Set your OpenAI API key here
+const fs = require("node:fs");
+const path = require("node:path");
 
+const TOKEN = process.env.DISCORD_TOKEN;
 
-// ============================================================
-//  1.  AI FUNCTION
-//      Responds when the bot is @mentioned or during an
-//      active conversation session.
-// ============================================================
+// IDs configurados
+const CLIENT_ID = process.env.CLIENT_ID || "1505542169971392693";
+const GUILD_ID = process.env.GUILD_ID || "1541451682872037386";
+const OWNER_ID = process.env.OWNER_ID || "1541467158901694505";
 
-// --- Low-level OpenAI request helper ---
-function callOpenAI(messages) {
-    if (!OPENAI_API_KEY) return Promise.resolve(null);
-    return new Promise((resolve) => {
-        const data = JSON.stringify({
-            model: 'gpt-3.5-turbo',
-            messages,
-            max_tokens: 300,
-            temperature: 0.8
-        });
-        const req = https.request({
-            hostname: 'api.openai.com',
-            path: '/v1/chat/completions',
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${OPENAI_API_KEY}`
-            }
-        }, res => {
-            let body = '';
-            res.on('data', chunk => body += chunk);
-            res.on('end', () => {
-                try { resolve(JSON.parse(body).choices[0].message.content); }
-                catch (e) { resolve(null); }
-            });
-        });
-        req.on('error', () => resolve(null));
-        req.write(data);
-        req.end();
-    });
+const DATA_FILE = path.join(__dirname, "ark-performance.json");
+
+if (!TOKEN) {
+  throw new Error("Falta configurar DISCORD_TOKEN en Secrets.");
 }
 
-// --- System prompt for the AI assistant ---
-const AI_SYSTEM_PROMPT = `You are the assistant bot for a design studio Discord server. You help customers with logos, banners, TikTok promos, and any design services offered. You are friendly, professional and respond in English.
-
-Your job:
-1. Greet customers warmly when they mention you
-2. Ask what they need (banner, logo, TikTok promo, etc.)
-3. Ask follow-up questions: colors, effects, style preferences, any reference images
-4. Once you have enough info, confirm the order details
-5. You can also answer questions about order status - tell them to check the order status channel or describe their current order status if you know it
-6. Keep responses concise and helpful
-7. Always respond in English
-8. If someone asks about pricing or services, explain you offer banners, logos, TikTok promos and other design services
-
-When the customer has provided all details for an order, end your message with [ORDER_COMPLETE] on a new line followed by the details in this format:
-TYPE: <type>
-NAME: <name or description>
-EFFECTS: <effects requested>
-COLORS: <colors requested>
-EXTRA: <any extra details>
-
-Only use [ORDER_COMPLETE] when you have gathered enough information to place the order.`;
-
-// --- Main AI conversation handler ---
-async function handleAIConversation(message, presetService = null) {
-    const userId = message.author.id;
-    if (!db.aiConversations[userId]) {
-        db.aiConversations[userId] = {
-            messages: [],
-            lastActivity: Date.now(),
-            photos: [],
-            service: presetService
-        };
-    }
-    const conv = db.aiConversations[userId];
-    conv.lastActivity = Date.now();
-
-    // Collect any image attachments
-    if (message.attachments.size > 0) {
-        message.attachments.forEach(att => {
-            if (att.contentType && att.contentType.startsWith('image')) {
-                conv.photos.push(att.url);
-            }
-        });
-    }
-
-    const userMsg = message.content.replace(/<@!?\d+>/g, '').trim();
-
-    // Check if the user is asking about their order status
-    const statusKeywords = ['order', 'status', 'how long', 'when', 'ready', 'done', 'progress', 'update', 'pedido', 'estado'];
-    const isStatusQuery = statusKeywords.some(k => userMsg.toLowerCase().includes(k));
-    if (isStatusQuery && db.activeOrders[userId]) {
-        const order = db.activeOrders[userId];
-        await message.reply(
-            `Hey! Your current order status is: **${order.status}**\n` +
-            `Estimated delivery: **${order.date}**\n\n` +
-            `You can also check the order status channel for live updates!`
-        );
-        return;
-    } else if (isStatusQuery && !db.activeOrders[userId]) {
-        await message.reply(
-            `Hey! I don't see any active orders for you right now. ` +
-            `If you'd like to place a new order, just let me know what you need! ` +
-            `We offer banners, logos, TikTok promos and more.`
-        );
-        return;
-    }
-
-    // Add the user's message to the conversation history
-    conv.messages.push({ role: 'user', content: userMsg || '(sent an image)' });
-
-    // Try OpenAI first
-    if (OPENAI_API_KEY) {
-        const systemPrompt = presetService
-            ? `${AI_SYSTEM_PROMPT}\n\nThe customer has already selected: ${presetService}. Start by greeting them and asking for details about their ${presetService} order.`
-            : AI_SYSTEM_PROMPT;
-
-        const aiMessages = [{ role: 'system', content: systemPrompt }, ...conv.messages];
-        const response = await callOpenAI(aiMessages);
-
-        if (response) {
-            conv.messages.push({ role: 'assistant', content: response });
-
-            if (response.includes('[ORDER_COMPLETE]')) {
-                const parts = response.split('[ORDER_COMPLETE]');
-                const replyText = parts[0].trim();
-                const orderDetails = parts[1]?.trim() || '';
-                await message.reply(replyText || 'Great! Your order has been submitted!');
-                await sendOrderEmbed(message, userId, orderDetails, conv.photos);
-                delete db.aiConversations[userId];
-                saveDB();
-                return;
-            }
-
-            await message.reply(response);
-            saveDB();
-            return;
-        }
-    }
-
-    // Fallback: rule-based conversation (used when OpenAI key is not set)
-    const step = conv.messages.filter(m => m.role === 'user').length;
-    let reply = '';
-
-    if (step === 1) {
-        if (presetService) {
-            reply = `Hi there! 👋 Great choice! You selected **${presetService}**. What name or text should appear on it?`;
-            conv.orderType = presetService;
-        } else {
-            reply = `Hi there! 👋 Welcome! I'm here to help you with your order. What do you need? We offer:\n\n• **Banners**\n• **Logos**\n• **TikTok Promos**\n• **Premium Service**\n\nJust tell me what you're looking for!`;
-        }
-    } else if (step === 2) {
-        if (!conv.orderType) conv.orderType = userMsg;
-        reply = `Awesome! So you're looking for a **${conv.orderType}**. What name or text should be on it?`;
-    } else if (step === 3) {
-        conv.orderName = userMsg;
-        reply = `Got it! What **effects** would you like? (e.g., glowing, neon, 3D, minimalist, gradient, etc.)`;
-    } else if (step === 4) {
-        conv.orderEffects = userMsg;
-        reply = `Nice choice! What **colors** do you want? (e.g., red and black, blue gradient, pastel colors, etc.)`;
-    } else if (step === 5) {
-        conv.orderColors = userMsg;
-        reply = `Almost done! Any **extra details**? (background preferences, reference images, special requests) Type "none" if you're all set.`;
-    } else if (step >= 6) {
-        conv.orderExtra = userMsg === 'none' ? 'None specified' : userMsg;
-        reply = `Perfect! Your order has been submitted! Our team will get on it soon. 🎨`;
-        const orderDetails =
-            `TYPE: ${conv.orderType || 'Not specified'}\n` +
-            `NAME: ${conv.orderName || 'Not specified'}\n` +
-            `EFFECTS: ${conv.orderEffects || 'Not specified'}\n` +
-            `COLORS: ${conv.orderColors || 'Not specified'}\n` +
-            `EXTRA: ${conv.orderExtra || 'None'}`;
-        await message.reply(reply);
-        await sendOrderEmbed(message, userId, orderDetails, conv.photos);
-        delete db.aiConversations[userId];
-        saveDB();
-        return;
-    }
-
-    conv.messages.push({ role: 'assistant', content: reply });
-    await message.reply(reply);
-    saveDB();
+// Base de datos
+function createEmptyDatabase() {
+  return {
+    players: {},
+  };
 }
 
-// --- Sends the completed order embed to the order form channel ---
-async function sendOrderEmbed(message, userId, orderDetails, photos) {
-    const lines = orderDetails.split('\n');
-    const getField = (prefix) => {
-        const line = lines.find(l => l.startsWith(prefix));
-        return line ? line.replace(prefix, '').trim() : 'Not specified';
+function loadDatabase() {
+  try {
+    return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+  } catch {
+    return createEmptyDatabase();
+  }
+}
+
+function saveDatabase() {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(database, null, 2));
+}
+
+let database = loadDatabase();
+
+// Utilidades
+function isOwner(interaction) {
+  return interaction.user.id === OWNER_ID;
+}
+
+function todayKey() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Madrid",
+  }).format(new Date());
+}
+
+function getPlayer(discordId) {
+  return database.players[discordId] || null;
+}
+
+function cleanValue(value, fallback = "—") {
+  return String(value ?? fallback).slice(0, 1024);
+}
+
+function getTodayStats(player) {
+  if (!player || !player.daily || !player.daily[todayKey()]) {
+    return {
+      hours: 0,
+      turretsBroken: 0,
+      dinosKilled: 0,
+      playersKilled: 0,
+      note: null,
+      source: "manual",
+      imageUrl: null,
     };
+  }
 
-    const emb = new EmbedBuilder()
-        .setAuthor({ name: `AI Order from ${message.author.username}`, iconURL: message.author.displayAvatarURL() })
-        .setColor(0x00FFFF)
-        .addFields(
-            { name: 'Type',             value: getField('TYPE:'),    inline: true  },
-            { name: 'Name/Description', value: getField('NAME:'),    inline: true  },
-            { name: 'Effects',          value: getField('EFFECTS:'), inline: true  },
-            { name: 'Colors',           value: getField('COLORS:'),  inline: false },
-            { name: 'Extra Details',    value: getField('EXTRA:'),   inline: false }
-        )
-        .setTimestamp();
-
-    if (photos && photos.length > 0) {
-        emb.setImage(photos[0]);
-        if (photos.length > 1) {
-            emb.addFields({
-                name: 'Reference Images',
-                value: photos.map((p, i) => `[Image ${i + 1}](${p})`).join(' | '),
-                inline: false
-            });
-        }
-    }
-
-    const orderChan = client.channels.cache.get(ORDER_FORM_CHANNEL_ID);
-    if (orderChan) {
-        await orderChan.send({ content: `🤖 AI-assisted order from <@${userId}>`, embeds: [emb] });
-    }
+  return player.daily[todayKey()];
 }
 
-// --- messageCreate event: triggers the AI when the bot is @mentioned ---
-client.on('messageCreate', async message => {
-    if (message.author.bot) return;
+// Calcula una nota automática si el owner no ha puesto nota manual
+function calculatePerformanceScore(stats) {
+  if (stats.note !== null && Number.isFinite(Number(stats.note))) {
+    return Math.max(1, Math.min(10, Number(stats.note)));
+  }
 
-    // If the user already has an active AI session, keep the conversation going
-    if (db.aiConversations && db.aiConversations[message.author.id]) {
-        const conv = db.aiConversations[message.author.id];
-        if (Date.now() - conv.lastActivity < 600000) { // 10-minute inactivity window
-            const botMentionCheck =
-                message.content.includes(`<@${CLIENT_ID}>`) ||
-                message.content.includes(`<@!${CLIENT_ID}>`);
-            if (!botMentionCheck) {
-                await handleAIConversation(message, conv.service || null);
-                return;
-            }
-        } else {
-            // Session expired
-            delete db.aiConversations[message.author.id];
-            saveDB();
-        }
+  const points =
+    Math.min(stats.hours / 8, 1) * 3 +
+    Math.min(stats.turretsBroken / 10, 1) * 3 +
+    Math.min(stats.dinosKilled / 25, 1) * 2 +
+    Math.min(stats.playersKilled / 5, 1) * 2;
+
+  return Math.max(1, Math.min(10, Math.round(points * 10) / 10));
+}
+
+// Crea el embed visual de la performance
+function createPerformanceEmbed(discordUser, player) {
+  const stats = getTodayStats(player);
+  const score = calculatePerformanceScore(stats);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x8b5cf6)
+    .setTitle(`Performance de ${player.name}`)
+    .setDescription(
+      `📅 **${todayKey()}**\n\n` +
+      `⭐ Nota general: **${score}/10**`
+    )
+    .addFields(
+      {
+        name: "🎮 PSN",
+        value: cleanValue(player.psn),
+        inline: true,
+      },
+      {
+        name: "⏱️ Horas jugadas",
+        value: `${stats.hours} horas`,
+        inline: true,
+      },
+      {
+        name: "🛡️ Torretas rotas",
+        value: `${stats.turretsBroken}`,
+        inline: true,
+      },
+      {
+        name: "🦖 Dinos matados",
+        value: `${stats.dinosKilled}`,
+        inline: true,
+      },
+      {
+        name: "⚔️ Jugadores matados",
+        value: `${stats.playersKilled}`,
+        inline: true,
+      },
+      {
+        name: "📌 Datos",
+        value:
+          stats.source === "image"
+            ? "Captura analizada automáticamente"
+            : "Datos introducidos manualmente",
+        inline: true,
+      }
+    )
+    .setFooter({
+      text: "ARK Tribe Performance",
+    })
+    .setTimestamp();
+
+  if (player.photoUrl) {
+    embed.setThumbnail(player.photoUrl);
+  }
+
+  if (stats.imageUrl) {
+    embed.setImage(stats.imageUrl);
+  }
+
+  if (discordUser) {
+    embed.setAuthor({
+      name: discordUser.username,
+      iconURL: discordUser.displayAvatarURL(),
+    });
+  }
+
+  return embed;
+}
+
+// Máximo 25 jugadores por selector de Discord
+function getPlayerChoices() {
+  return Object.entries(database.players)
+    .slice(0, 25)
+    .map(([discordId, player]) => ({
+      id: discordId,
+      name: player.name,
+    }));
+}
+
+// Comandos slash
+const commands = [
+  new SlashCommandBuilder()
+    .setName("vincular")
+    .setDescription("Vincula un miembro de Discord con su cuenta de PSN")
+    .addUserOption(option =>
+      option
+        .setName("jugador")
+        .setDescription("Jugador de Discord")
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option
+        .setName("psn")
+        .setDescription("ID o nombre de PlayStation Network")
+        .setRequired(true)
+    )
+    .addNumberOption(option =>
+      option
+        .setName("horas")
+        .setDescription("Horas jugadas hoy")
+        .setMinValue(0)
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("horas")
+    .setDescription("Actualiza las horas jugadas hoy")
+    .addUserOption(option =>
+      option
+        .setName("jugador")
+        .setDescription("Jugador")
+        .setRequired(true)
+    )
+    .addNumberOption(option =>
+      option
+        .setName("cantidad")
+        .setDescription("Horas jugadas hoy")
+        .setMinValue(0)
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("registrar-stats")
+    .setDescription("Registra las estadísticas diarias")
+    .addUserOption(option =>
+      option
+        .setName("jugador")
+        .setDescription("Jugador")
+        .setRequired(true)
+    )
+    .addIntegerOption(option =>
+      option
+        .setName("torretas")
+        .setDescription("Torretas rotas")
+        .setMinValue(0)
+        .setRequired(true)
+    )
+    .addIntegerOption(option =>
+      option
+        .setName("dinos")
+        .setDescription("Dinos matados")
+        .setMinValue(0)
+        .setRequired(true)
+    )
+    .addIntegerOption(option =>
+      option
+        .setName("jugadores")
+        .setDescription("Jugadores matados")
+        .setMinValue(0)
+        .setRequired(true)
+    )
+    .addIntegerOption(option =>
+      option
+        .setName("nota")
+        .setDescription("Nota general del 1 al 10")
+        .setMinValue(1)
+        .setMaxValue(10)
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("subir-foto")
+    .setDescription("Guarda la foto de perfil de un jugador")
+    .addUserOption(option =>
+      option
+        .setName("jugador")
+        .setDescription("Jugador")
+        .setRequired(true)
+    )
+    .addAttachmentOption(option =>
+      option
+        .setName("foto")
+        .setDescription("Foto del jugador")
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("subir-captura")
+    .setDescription("Analiza una captura con estadísticas de ARK")
+    .addUserOption(option =>
+      option
+        .setName("jugador")
+        .setDescription("Jugador")
+        .setRequired(true)
+    )
+    .addAttachmentOption(option =>
+      option
+        .setName("captura")
+        .setDescription("Captura de las estadísticas")
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("performance")
+    .setDescription("Muestra la performance de un jugador")
+    .addUserOption(option =>
+      option
+        .setName("jugador")
+        .setDescription("Jugador")
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("tribu")
+    .setDescription("Muestra un selector con todos los jugadores"),
+].map(command => command.toJSON());
+
+// Registra los comandos en tu servidor
+async function registerCommands() {
+  const rest = new REST({ version: "10" }).setToken(TOKEN);
+
+  const route = Routes.applicationGuildCommands(
+    CLIENT_ID,
+    GUILD_ID
+  );
+
+  await rest.put(route, {
+    body: commands,
+  });
+
+  console.log(`✅ ${commands.length} comandos registrados.`);
+}
+
+// Analiza una captura usando OpenAI
+async function analyzeImage(imageUrl) {
+  if (!process.env.OPENAI_API_KEY) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          response_format: {
+            type: "json_object",
+          },
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "Analiza esta captura de ARK. Devuelve exclusivamente JSON válido " +
+                    "con estas claves: hours, turretsBroken, dinosKilled, " +
+                    "playersKilled y note. " +
+                    "Si un dato no aparece, usa 0. " +
+                    "Para note usa null si no aparece. " +
+                    "No inventes ningún dato.",
+                },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: imageUrl,
+                  },
+                },
+              ],
+            },
+          ],
+          max_tokens: 200,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      return null;
     }
 
-    // Respond only when explicitly @mentioned (not via a reply)
-    const botMentionInContent =
-        message.content.includes(`<@${CLIENT_ID}>`) ||
-        message.content.includes(`<@!${CLIENT_ID}>`);
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
 
-    if (botMentionInContent && !message.reference) {
-        try {
-            const menuEmb = new EmbedBuilder()
-                .setTitle('👋 Welcome to Tek Services!')
-                .setColor(0x00FFFF)
-                .setDescription(
-                    `Hi <@${message.author.id}>! What service are you looking for?\n\n` +
-                    `Select one of the options below and I'll guide you through the order process.`
-                )
-                .addFields(
-                    { name: '🎨 Logo Design',   value: 'Custom logos for your server or brand',      inline: true },
-                    { name: '🖼️ Banners',        value: 'Eye-catching banners for any platform',       inline: true },
-                    { name: '📱 TikTok Promos',  value: 'Animated promos for TikTok & social media',  inline: true },
-                    { name: '⭐ Premium Service', value: '🔒 **Exclusive channels & unique perks:**\n• Access to private VIP channels\n• Exclusive giveaways & events\n• Discounts on all services\n• Visible premium role in the server\n• Priority support 24/7', inline: true }
-                )
-                .setFooter({ text: 'Select a service to get started' });
-
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`ai_service_logo_${message.author.id}`).setLabel('🎨 Logo').setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId(`ai_service_banner_${message.author.id}`).setLabel('🖼️ Banner').setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId(`ai_service_promo_${message.author.id}`).setLabel('📱 TikTok Promo').setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder().setCustomId(`ai_service_premium_${message.author.id}`).setLabel('⭐ Premium Service').setStyle(ButtonStyle.Success),
-                new ButtonBuilder().setCustomId(`ai_service_other_${message.author.id}`).setLabel('❓ Other').setStyle(ButtonStyle.Secondary)
-            );
-
-            await message.reply({ embeds: [menuEmb], components: [row] });
-        } catch (e) {
-            console.error('AI service menu error:', e);
-            await message.reply("Hi! 👋 I'm here to help! What do you need? We offer banners, logos, TikTok promos and more!").catch(() => {});
-        }
+    if (!content) {
+      return null;
     }
+
+    const result = JSON.parse(content);
+
+    return {
+      hours: Math.max(0, Number(result.hours) || 0),
+      turretsBroken: Math.max(
+        0,
+        Number(result.turretsBroken) || 0
+      ),
+      dinosKilled: Math.max(
+        0,
+        Number(result.dinosKilled) || 0
+      ),
+      playersKilled: Math.max(
+        0,
+        Number(result.playersKilled) || 0
+      ),
+      note:
+        result.note === null || result.note === undefined
+          ? null
+          : Math.max(1, Math.min(10, Number(result.note) || 1)),
+      source: "image",
+      imageUrl,
+    };
+  } catch (error) {
+    console.error("Error analizando la imagen:", error.message);
+    return null;
+  }
+}
+
+// Cliente de Discord
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+  ],
 });
 
+client.once("ready", () => {
+  console.log(`🤖 Bot conectado como ${client.user.tag}`);
+});
 
-// ============================================================
-//  2.  ORDER STATUS FUNCTION
-// ============================================================
+// Interacciones
+client.on("interactionCreate", async interaction => {
+  try {
+    // Selector de jugadores
+    if (
+      interaction.isStringSelectMenu() &&
+      interaction.customId === "tribe-performance"
+    ) {
+      const playerId = interaction.values[0];
+      const player = getPlayer(playerId);
 
-async function updateOrderEmbed() {
-    const ordersList = Object.keys(db.activeOrders).length > 0
-        ? Object.entries(db.activeOrders).map(([id, data]) =>
-            `<:va_arrow:1484225522367205527> Order: <@${id}> -- Status: ${data.status}\n` +
-            `<:utlarrowscratch1:1484937472449318962> Estimated delivery: ${data.date}`
-          ).join('\n\n')
-        : 'No active orders.';
+      if (!player) {
+        return interaction.reply({
+          content: "Ese jugador ya no existe.",
+          ephemeral: true,
+        });
+      }
 
-    const emb = new EmbedBuilder()
-        .setTitle('ORDER STATUS 📦')
-        .setColor(0x00FFFF)
-        .setDescription(`🟢 Done it.\n🟡 Working on it.\n🔴 Waiting.\n\n${ordersList}`);
+      const discordUser = await client.users
+        .fetch(playerId)
+        .catch(() => null);
 
-    const orderChan = client.channels.cache.get(ORDER_CHANNEL_ID);
-    let sent = false;
-
-    if (db.lastOrderMessageId && orderChan) {
-        try {
-            const msg = await orderChan.messages.fetch(db.lastOrderMessageId);
-            if (msg) { await msg.edit({ embeds: [emb] }); sent = true; }
-        } catch (e) {}
+      return interaction.reply({
+        embeds: [
+          createPerformanceEmbed(discordUser, player),
+        ],
+        ephemeral: true,
+      });
     }
 
-    if (!sent && orderChan) {
-        const newMsg = await orderChan.send({ embeds: [emb] });
-        db.lastOrderMessageId = newMsg.id;
-        saveDB();
+    if (!interaction.isChatInputCommand()) {
+      return;
     }
-}
 
-// --- /order-status slash command handler (paste inside interactionCreate) ---
-// if (commandName === 'order-status') {
-//     if (userId !== OWNER_ID)
-//         return interaction.reply({ content: '❌ Owner only.', ephemeral: true });
-//     const target = options.getUser('user');
-//     const st     = options.getString('status');
-//     const dt     = options.getString('date');
-//     db.activeOrders[target.id] = { status: st, date: dt };
-//     saveDB();
-//     await updateOrderEmbed();
-//     return interaction.reply({ content: '✅ Order status posted/updated.', ephemeral: true });
-// }
+    const commandName = interaction.commandName;
 
-// --- /order-clear slash command handler (paste inside interactionCreate) ---
-// if (commandName === 'order-clear') {
-//     if (userId !== OWNER_ID)
-//         return interaction.reply({ content: '❌ Owner only.', ephemeral: true });
-//     const inputId = options.getString('id');
-//     if (inputId.toLowerCase() === 'all') {
-//         db.activeOrders = {};
-//         if (db.lastOrderMessageId) {
-//             try { await client.channels.cache.get(ORDER_CHANNEL_ID)?.messages.fetch(db.lastOrderMessageId).then(m => m.delete()); } catch(e){}
-//             db.lastOrderMessageId = null;
-//         }
-//         saveDB();
-//         return interaction.reply({ content: '✅ All orders cleared.', ephemeral: true });
-//     } else {
-//         if (db.activeOrders[inputId]) {
-//             delete db.activeOrders[inputId]; saveDB();
-//             await updateOrderEmbed();
-//             return interaction.reply({ content: `✅ Order for user ${inputId} removed.`, ephemeral: true });
-//         } else {
-//             return interaction.reply({ content: '❌ User ID not found. Use "all" to clear everything.', ephemeral: true });
-//         }
-//     }
-// }
+    const adminCommands = [
+      "vincular",
+      "horas",
+      "registrar-stats",
+      "subir-foto",
+      "subir-captura",
+    ];
 
-// --- Owner shortcut inside messageCreate ---
-// if (message.author.id === OWNER_ID) {
-//     const content = message.content.toLowerCase();
-//     const mentionedUser = message.mentions.users.first();
-//     if (mentionedUser) {
-//         let statusToSet = null; let isDelete = false;
-//         if (content.includes('waiting')) statusToSet = '🔴';
-//         else if (content.includes('working')) statusToSet = '🟡';
-//         else if (content.includes('done'))    statusToSet = '🟢';
-//         else if (content.includes('delete'))  isDelete = true;
-//         if (statusToSet || isDelete) {
-//             if (isDelete) {
-//                 if (db.activeOrders[mentionedUser.id]) delete db.activeOrders[mentionedUser.id];
-//             } else {
-//                 const existingDate = db.activeOrders[mentionedUser.id]?.date || 'Pending';
-//                 db.activeOrders[mentionedUser.id] = { status: statusToSet, date: existingDate };
-//             }
-//             saveDB();
-//             await updateOrderEmbed();
-//             message.react('✅').catch(() => {});
-//         }
-//     }
-// }
+    if (
+      adminCommands.includes(commandName) &&
+      !isOwner(interaction)
+    ) {
+      return interaction.reply({
+        content:
+          "❌ Solo el owner puede modificar las performances.",
+        ephemeral: true,
+      });
+    }
+
+    // /vincular
+    if (commandName === "vincular") {
+      const user = interaction.options.getUser("jugador");
+      const psn = interaction.options.getString("psn");
+      const hours = interaction.options.getNumber("horas");
+
+      const oldPlayer = getPlayer(user.id);
+
+      database.players[user.id] = {
+        ...(oldPlayer || {}),
+        name: user.globalName || user.username,
+        psn,
+        photoUrl:
+          oldPlayer?.photoUrl ||
+          user.displayAvatarURL({
+            extension: "png",
+            size: 256,
+          }),
+        daily: oldPlayer?.daily || {},
+      };
+
+      if (hours !== null) {
+        database.players[user.id].daily[todayKey()] = {
+          ...getTodayStats(database.players[user.id]),
+          hours,
+        };
+      }
+
+      saveDatabase();
+
+      return interaction.reply({
+        content:
+          `✅ ${user} ha sido vinculado con PSN **${psn}**.`,
+        ephemeral: true,
+      });
+    }
+
+    // /horas
+    if (commandName === "horas") {
+      const user = interaction.options.getUser("jugador");
+      const amount = interaction.options.getNumber("cantidad");
+      const player = getPlayer(user.id);
+
+      if (!player) {
+        return interaction.reply({
+          content:
+            "❌ Primero tienes que vincular al jugador con `/vincular`.",
+          ephemeral: true,
+        });
+      }
+
+      player.daily[todayKey()] = {
+        ...getTodayStats(player),
+        hours: amount,
+      };
+
+      saveDatabase();
+
+      return interaction.reply({
+        content:
+          `✅ Horas de **${player.name}** actualizadas a **${amount}**.`,
+        ephemeral: true,
+      });
+    }
+
+    // /registrar-stats
+    if (commandName === "registrar-stats") {
+      const user = interaction.options.getUser("jugador");
+      const turrets = interaction.options.getInteger("torretas");
+      const dinos = interaction.options.getInteger("dinos");
+      const players = interaction.options.getInteger("jugadores");
+      const note = interaction.options.getInteger("nota");
+
+      const player = getPlayer(user.id);
+
+      if (!player) {
+        return interaction.reply({
+          content:
+            "❌ Primero tienes que vincular al jugador con `/vincular`.",
+          ephemeral: true,
+        });
+      }
+
+      player.daily[todayKey()] = {
+        ...getTodayStats(player),
+        turretsBroken: turrets,
+        dinosKilled: dinos,
+        playersKilled: players,
+        note,
+        source: "manual",
+      };
+
+      saveDatabase();
+
+      return interaction.reply({
+        content:
+          `✅ Estadísticas de **${player.name}** guardadas para hoy.`,
+        ephemeral: true,
+      });
+    }
+
+    // /subir-foto
+    if (commandName === "subir-foto") {
+      const user = interaction.options.getUser("jugador");
+      const attachment = interaction.options.getAttachment("foto");
+
+      if (!attachment.contentType?.startsWith("image/")) {
+        return interaction.reply({
+          content: "❌ El archivo tiene que ser una imagen.",
+          ephemeral: true,
+        });
+      }
+
+      const player = getPlayer(user.id);
+
+      if (!player) {
+        return interaction.reply({
+          content:
+            "❌ Primero tienes que vincular al jugador con `/vincular`.",
+          ephemeral: true,
+        });
+      }
+
+      player.photoUrl = attachment.url;
+      saveDatabase();
+
+      return interaction.reply({
+        content:
+          `✅ Foto de **${player.name}** guardada correctamente.`,
+        ephemeral: true,
+      });
+    }
+
+    // /subir-captura
+    if (commandName === "subir-captura") {
+      const user = interaction.options.getUser("jugador");
+      const attachment =
+        interaction.options.getAttachment("captura");
+
+      if (!attachment.contentType?.startsWith("image/")) {
+        return interaction.reply({
+          content: "❌ El archivo tiene que ser una imagen.",
+          ephemeral: true,
+        });
+      }
+
+      const player = getPlayer(user.id);
+
+      if (!player) {
+        return interaction.reply({
+          content:
+            "❌ Primero tienes que vincular al jugador con `/vincular`.",
+          ephemeral: true,
+        });
+      }
+
+      const stats = await analyzeImage(attachment.url);
+
+      if (!stats) {
+        return interaction.reply({
+          content: process.env.OPENAI_API_KEY
+            ? "❌ No pude leer la captura. Usa `/registrar-stats` para introducir los datos."
+            : "ℹ️ No hay OPENAI_API_KEY configurada. Usa `/registrar-stats` para introducir los datos manualmente.",
+          ephemeral: true,
+        });
+      }
+
+      player.daily[todayKey()] = {
+        ...getTodayStats(player),
+        ...stats,
+      };
+
+      saveDatabase();
+
+      return interaction.reply({
+        content:
+          `✅ Captura analizada y estadísticas de **${player.name}** guardadas.`,
+        ephemeral: true,
+      });
+    }
+
+    // /performance
+    if (commandName === "performance") {
+      const user = interaction.options.getUser("jugador");
+      const player = getPlayer(user.id);
+
+      if (!player) {
+        return interaction.reply({
+          content:
+            "❌ Ese jugador todavía no está vinculado.",
+          ephemeral: true,
+        });
+      }
+
+      return interaction.reply({
+        embeds: [
+          createPerformanceEmbed(user, player),
+        ],
+      });
+    }
+
+    // /tribu
+    if (commandName === "tribu") {
+      const players = getPlayerChoices();
+
+      if (!players.length) {
+        return interaction.reply({
+          content:
+            "❌ Todavía no hay jugadores vinculados.",
+          ephemeral: true,
+        });
+      }
+
+      const menu = new StringSelectMenuBuilder()
+        .setCustomId("tribe-performance")
+        .setPlaceholder("Selecciona un miembro de la tribu")
+        .addOptions(
+          players.map(player =>
+            new StringSelectMenuOptionBuilder()
+              .setLabel(player.name.slice(0, 100))
+              .setValue(player.id)
+              .setDescription("Ver performance de hoy")
+          )
+        );
+
+      const embed = new EmbedBuilder()
+        .setColor(0x8b5cf6)
+        .setTitle("📊 Performance de la tribu")
+        .setDescription(
+          "Selecciona un jugador para ver su foto y sus estadísticas de hoy."
+        );
+
+      return interaction.reply({
+        embeds: [embed],
+        components: [
+          new ActionRowBuilder().addComponents(menu),
+        ],
+      });
+    }
+  } catch (error) {
+    console.error("Error en interacción:", error);
+
+    const response = {
+      content: "❌ Ha ocurrido un error procesando el comando.",
+      ephemeral: true,
+    };
+
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp(response).catch(() => {});
+    } else {
+      await interaction.reply(response).catch(() => {});
+    }
+  }
+});
+
+// Arranque
+registerCommands()
+  .then(() => client.login(TOKEN))
+  .catch(error => {
+    console.error("No se pudo iniciar el bot:", error);
+    process.exitCode = 1;
+  });
