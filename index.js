@@ -1,14 +1,3 @@
-/**
- * Bot de rendimiento ARK
- *
- * Instalación:
- * npm install discord.js
- *
- * Variables:
- * DISCORD_TOKEN
- * OPENAI_API_KEY        Opcional, para analizar capturas
- */
-
 const {
   Client,
   GatewayIntentBits,
@@ -18,181 +7,194 @@ const {
   EmbedBuilder,
   ActionRowBuilder,
   StringSelectMenuBuilder,
-  StringSelectMenuOptionBuilder,
+  StringSelectMenuOptionBuilder
 } = require("discord.js");
 
-const fs = require("node:fs");
-const path = require("node:path");
+const fs = require("fs");
+const path = require("path");
+
+// ===============================
+// CONFIGURACIÓN
+// ===============================
 
 const TOKEN = process.env.DISCORD_TOKEN;
 
-// IDs configurados
-const CLIENT_ID = process.env.CLIENT_ID || "1505542169971392693";
-const GUILD_ID = process.env.GUILD_ID || "1541451682872037386";
-const OWNER_ID = process.env.OWNER_ID || "1541467158901694505";
+const CLIENT_ID = "1505542169971392693";
+const GUILD_ID = "1541451682872037386";
+const OWNER_ID = "1541467158901694505";
 
-const DATA_FILE = path.join(__dirname, "ark-performance.json");
+const DATABASE_FILE = path.join(__dirname, "ark-performance.json");
 
 if (!TOKEN) {
-  throw new Error("Falta configurar DISCORD_TOKEN en Secrets.");
+  console.error("ERROR: Falta la variable DISCORD_TOKEN en Railway.");
+  process.exit(1);
 }
 
-// Base de datos
-function createEmptyDatabase() {
-  return {
-    players: {},
-  };
-}
+// ===============================
+// BASE DE DATOS
+// ===============================
 
-function loadDatabase() {
+function cargarBaseDeDatos() {
   try {
-    return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-  } catch {
-    return createEmptyDatabase();
+    if (!fs.existsSync(DATABASE_FILE)) {
+      return { players: {} };
+    }
+
+    return JSON.parse(fs.readFileSync(DATABASE_FILE, "utf8"));
+  } catch (error) {
+    console.error("Error leyendo la base de datos:", error);
+    return { players: {} };
   }
 }
 
-function saveDatabase() {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(database, null, 2));
+function guardarBaseDeDatos() {
+  try {
+    fs.writeFileSync(
+      DATABASE_FILE,
+      JSON.stringify(database, null, 2),
+      "utf8"
+    );
+  } catch (error) {
+    console.error("Error guardando la base de datos:", error);
+  }
 }
 
-let database = loadDatabase();
+const database = cargarBaseDeDatos();
 
-// Utilidades
-function isOwner(interaction) {
+// ===============================
+// FUNCIONES AUXILIARES
+// ===============================
+
+function esOwner(interaction) {
   return interaction.user.id === OWNER_ID;
 }
 
-function todayKey() {
+function fechaDeHoy() {
   return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Madrid",
+    timeZone: "Europe/Madrid"
   }).format(new Date());
 }
 
-function getPlayer(discordId) {
+function obtenerJugador(discordId) {
   return database.players[discordId] || null;
 }
 
-function cleanValue(value, fallback = "—") {
-  return String(value ?? fallback).slice(0, 1024);
-}
+function obtenerStatsDeHoy(jugador) {
+  const fecha = fechaDeHoy();
 
-function getTodayStats(player) {
-  if (!player || !player.daily || !player.daily[todayKey()]) {
-    return {
-      hours: 0,
-      turretsBroken: 0,
-      dinosKilled: 0,
-      playersKilled: 0,
-      note: null,
-      source: "manual",
-      imageUrl: null,
+  if (!jugador.daily) {
+    jugador.daily = {};
+  }
+
+  if (!jugador.daily[fecha]) {
+    jugador.daily[fecha] = {
+      horas: 0,
+      torretas: 0,
+      dinos: 0,
+      jugadores: 0,
+      nota: null,
+      origen: "manual",
+      captura: null
     };
   }
 
-  return player.daily[todayKey()];
+  return jugador.daily[fecha];
 }
 
-// Calcula una nota automática si el owner no ha puesto nota manual
-function calculatePerformanceScore(stats) {
-  if (stats.note !== null && Number.isFinite(Number(stats.note))) {
-    return Math.max(1, Math.min(10, Number(stats.note)));
+function calcularNota(stats) {
+  if (stats.nota !== null && stats.nota !== undefined) {
+    return Math.max(1, Math.min(10, Number(stats.nota)));
   }
 
-  const points =
-    Math.min(stats.hours / 8, 1) * 3 +
-    Math.min(stats.turretsBroken / 10, 1) * 3 +
-    Math.min(stats.dinosKilled / 25, 1) * 2 +
-    Math.min(stats.playersKilled / 5, 1) * 2;
+  const puntos =
+    Math.min(stats.horas / 8, 1) * 3 +
+    Math.min(stats.torretas / 10, 1) * 3 +
+    Math.min(stats.dinos / 25, 1) * 2 +
+    Math.min(stats.jugadores / 5, 1) * 2;
 
-  return Math.max(1, Math.min(10, Math.round(points * 10) / 10));
+  return Math.max(
+    1,
+    Math.min(10, Math.round(puntos * 10) / 10)
+  );
 }
 
-// Crea el embed visual de la performance
-function createPerformanceEmbed(discordUser, player) {
-  const stats = getTodayStats(player);
-  const score = calculatePerformanceScore(stats);
+function crearEmbedPerformance(usuario, jugador) {
+  const stats = obtenerStatsDeHoy(jugador);
+  const nota = calcularNota(stats);
 
   const embed = new EmbedBuilder()
     .setColor(0x8b5cf6)
-    .setTitle(`Performance de ${player.name}`)
+    .setTitle(`Performance de ${jugador.nombre}`)
     .setDescription(
-      `📅 **${todayKey()}**\n\n` +
-      `⭐ Nota general: **${score}/10**`
+      `📅 Fecha: **${fechaDeHoy()}**\n\n` +
+      `⭐ Nota general: **${nota}/10**`
     )
     .addFields(
       {
         name: "🎮 PSN",
-        value: cleanValue(player.psn),
-        inline: true,
+        value: jugador.psn || "No indicado",
+        inline: true
       },
       {
         name: "⏱️ Horas jugadas",
-        value: `${stats.hours} horas`,
-        inline: true,
+        value: `${stats.horas} horas`,
+        inline: true
       },
       {
         name: "🛡️ Torretas rotas",
-        value: `${stats.turretsBroken}`,
-        inline: true,
+        value: `${stats.torretas}`,
+        inline: true
       },
       {
         name: "🦖 Dinos matados",
-        value: `${stats.dinosKilled}`,
-        inline: true,
+        value: `${stats.dinos}`,
+        inline: true
       },
       {
         name: "⚔️ Jugadores matados",
-        value: `${stats.playersKilled}`,
-        inline: true,
+        value: `${stats.jugadores}`,
+        inline: true
       },
       {
         name: "📌 Datos",
         value:
-          stats.source === "image"
-            ? "Captura analizada automáticamente"
-            : "Datos introducidos manualmente",
-        inline: true,
+          stats.origen === "captura"
+            ? "Leídos desde una captura"
+            : "Introducidos manualmente",
+        inline: true
       }
     )
     .setFooter({
-      text: "ARK Tribe Performance",
+      text: "ARK Tribe Performance"
     })
     .setTimestamp();
 
-  if (player.photoUrl) {
-    embed.setThumbnail(player.photoUrl);
+  if (jugador.foto) {
+    embed.setThumbnail(jugador.foto);
   }
 
-  if (stats.imageUrl) {
-    embed.setImage(stats.imageUrl);
+  if (stats.captura) {
+    embed.setImage(stats.captura);
   }
 
-  if (discordUser) {
+  if (usuario) {
     embed.setAuthor({
-      name: discordUser.username,
-      iconURL: discordUser.displayAvatarURL(),
+      name: usuario.username,
+      iconURL: usuario.displayAvatarURL()
     });
   }
 
   return embed;
 }
 
-// Máximo 25 jugadores por selector de Discord
-function getPlayerChoices() {
-  return Object.entries(database.players)
-    .slice(0, 25)
-    .map(([discordId, player]) => ({
-      id: discordId,
-      name: player.name,
-    }));
-}
+// ===============================
+// COMANDOS
+// ===============================
 
-// Comandos slash
-const commands = [
+const comandos = [
   new SlashCommandBuilder()
     .setName("vincular")
-    .setDescription("Vincula un miembro de Discord con su cuenta de PSN")
+    .setDescription("Vincula un jugador de Discord con su PSN")
     .addUserOption(option =>
       option
         .setName("jugador")
@@ -202,7 +204,7 @@ const commands = [
     .addStringOption(option =>
       option
         .setName("psn")
-        .setDescription("ID o nombre de PlayStation Network")
+        .setDescription("Nombre o ID de PSN")
         .setRequired(true)
     )
     .addNumberOption(option =>
@@ -225,14 +227,14 @@ const commands = [
     .addNumberOption(option =>
       option
         .setName("cantidad")
-        .setDescription("Horas jugadas hoy")
+        .setDescription("Número de horas")
         .setMinValue(0)
         .setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("registrar-stats")
-    .setDescription("Registra las estadísticas diarias")
+    .setDescription("Registra las estadísticas de hoy")
     .addUserOption(option =>
       option
         .setName("jugador")
@@ -263,7 +265,7 @@ const commands = [
     .addIntegerOption(option =>
       option
         .setName("nota")
-        .setDescription("Nota general del 1 al 10")
+        .setDescription("Nota del 1 al 10")
         .setMinValue(1)
         .setMaxValue(10)
         .setRequired(false)
@@ -271,7 +273,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("subir-foto")
-    .setDescription("Guarda la foto de perfil de un jugador")
+    .setDescription("Sube la foto del jugador")
     .addUserOption(option =>
       option
         .setName("jugador")
@@ -287,7 +289,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("subir-captura")
-    .setDescription("Analiza una captura con estadísticas de ARK")
+    .setDescription("Guarda una captura de estadísticas")
     .addUserOption(option =>
       option
         .setName("jugador")
@@ -297,7 +299,7 @@ const commands = [
     .addAttachmentOption(option =>
       option
         .setName("captura")
-        .setDescription("Captura de las estadísticas")
+        .setDescription("Captura del tribelog")
         .setRequired(true)
     ),
 
@@ -313,152 +315,63 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("tribu")
-    .setDescription("Muestra un selector con todos los jugadores"),
-].map(command => command.toJSON());
+    .setDescription("Muestra el selector de jugadores")
+].map(comando => comando.toJSON());
 
-// Registra los comandos en tu servidor
-async function registerCommands() {
+// ===============================
+// REGISTRAR COMANDOS
+// ===============================
+
+async function registrarComandos() {
   const rest = new REST({ version: "10" }).setToken(TOKEN);
 
-  const route = Routes.applicationGuildCommands(
-    CLIENT_ID,
-    GUILD_ID
+  await rest.put(
+    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+    {
+      body: comandos
+    }
   );
 
-  await rest.put(route, {
-    body: commands,
-  });
-
-  console.log(`✅ ${commands.length} comandos registrados.`);
+  console.log("✅ Comandos registrados correctamente.");
 }
 
-// Analiza una captura usando OpenAI
-async function analyzeImage(imageUrl) {
-  if (!process.env.OPENAI_API_KEY) {
-    return null;
-  }
+// ===============================
+// CLIENTE DISCORD
+// ===============================
 
-  try {
-    const response = await fetch(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          response_format: {
-            type: "json_object",
-          },
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text:
-                    "Analiza esta captura de ARK. Devuelve exclusivamente JSON válido " +
-                    "con estas claves: hours, turretsBroken, dinosKilled, " +
-                    "playersKilled y note. " +
-                    "Si un dato no aparece, usa 0. " +
-                    "Para note usa null si no aparece. " +
-                    "No inventes ningún dato.",
-                },
-                {
-                  type: "image_url",
-                  image_url: {
-                    url: imageUrl,
-                  },
-                },
-              ],
-            },
-          ],
-          max_tokens: 200,
-        }),
-      }
-    );
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-
-    if (!content) {
-      return null;
-    }
-
-    const result = JSON.parse(content);
-
-    return {
-      hours: Math.max(0, Number(result.hours) || 0),
-      turretsBroken: Math.max(
-        0,
-        Number(result.turretsBroken) || 0
-      ),
-      dinosKilled: Math.max(
-        0,
-        Number(result.dinosKilled) || 0
-      ),
-      playersKilled: Math.max(
-        0,
-        Number(result.playersKilled) || 0
-      ),
-      note:
-        result.note === null || result.note === undefined
-          ? null
-          : Math.max(1, Math.min(10, Number(result.note) || 1)),
-      source: "image",
-      imageUrl,
-    };
-  } catch (error) {
-    console.error("Error analizando la imagen:", error.message);
-    return null;
-  }
-}
-
-// Cliente de Discord
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
-  ],
+  intents: [GatewayIntentBits.Guilds]
 });
 
 client.once("ready", () => {
-  console.log(`🤖 Bot conectado como ${client.user.tag}`);
+  console.log(`✅ Bot conectado como ${client.user.tag}`);
 });
 
-// Interacciones
 client.on("interactionCreate", async interaction => {
   try {
-    // Selector de jugadores
+    // Selector /tribu
     if (
       interaction.isStringSelectMenu() &&
-      interaction.customId === "tribe-performance"
+      interaction.customId === "selector-performance"
     ) {
-      const playerId = interaction.values[0];
-      const player = getPlayer(playerId);
+      const jugador = obtenerJugador(interaction.values[0]);
 
-      if (!player) {
+      if (!jugador) {
         return interaction.reply({
           content: "Ese jugador ya no existe.",
-          ephemeral: true,
+          ephemeral: true
         });
       }
 
-      const discordUser = await client.users
-        .fetch(playerId)
+      const usuario = await client.users
+        .fetch(interaction.values[0])
         .catch(() => null);
 
       return interaction.reply({
         embeds: [
-          createPerformanceEmbed(discordUser, player),
+          crearEmbedPerformance(usuario, jugador)
         ],
-        ephemeral: true,
+        ephemeral: true
       });
     }
 
@@ -466,249 +379,239 @@ client.on("interactionCreate", async interaction => {
       return;
     }
 
-    const commandName = interaction.commandName;
+    const comando = interaction.commandName;
 
-    const adminCommands = [
+    const comandosDeOwner = [
       "vincular",
       "horas",
       "registrar-stats",
       "subir-foto",
-      "subir-captura",
+      "subir-captura"
     ];
 
     if (
-      adminCommands.includes(commandName) &&
-      !isOwner(interaction)
+      comandosDeOwner.includes(comando) &&
+      !esOwner(interaction)
     ) {
       return interaction.reply({
         content:
-          "❌ Solo el owner puede modificar las performances.",
-        ephemeral: true,
+          "❌ Solo el owner puede modificar los datos.",
+        ephemeral: true
       });
     }
 
     // /vincular
-    if (commandName === "vincular") {
-      const user = interaction.options.getUser("jugador");
+    if (comando === "vincular") {
+      const usuario = interaction.options.getUser("jugador");
       const psn = interaction.options.getString("psn");
-      const hours = interaction.options.getNumber("horas");
+      const horas = interaction.options.getNumber("horas");
 
-      const oldPlayer = getPlayer(user.id);
+      const anterior = obtenerJugador(usuario.id);
 
-      database.players[user.id] = {
-        ...(oldPlayer || {}),
-        name: user.globalName || user.username,
+      database.players[usuario.id] = {
+        nombre: usuario.globalName || usuario.username,
         psn,
-        photoUrl:
-          oldPlayer?.photoUrl ||
-          user.displayAvatarURL({
+        foto:
+          anterior?.foto ||
+          usuario.displayAvatarURL({
             extension: "png",
-            size: 256,
+            size: 256
           }),
-        daily: oldPlayer?.daily || {},
+        daily: anterior?.daily || {}
       };
 
-      if (hours !== null) {
-        database.players[user.id].daily[todayKey()] = {
-          ...getTodayStats(database.players[user.id]),
-          hours,
-        };
+      if (horas !== null) {
+        const stats = obtenerStatsDeHoy(
+          database.players[usuario.id]
+        );
+
+        stats.horas = horas;
       }
 
-      saveDatabase();
+      guardarBaseDeDatos();
 
       return interaction.reply({
         content:
-          `✅ ${user} ha sido vinculado con PSN **${psn}**.`,
-        ephemeral: true,
+          `✅ ${usuario} vinculado con PSN **${psn}**.`,
+        ephemeral: true
       });
     }
 
     // /horas
-    if (commandName === "horas") {
-      const user = interaction.options.getUser("jugador");
-      const amount = interaction.options.getNumber("cantidad");
-      const player = getPlayer(user.id);
+    if (comando === "horas") {
+      const usuario = interaction.options.getUser("jugador");
+      const cantidad = interaction.options.getNumber("cantidad");
+      const jugador = obtenerJugador(usuario.id);
 
-      if (!player) {
+      if (!jugador) {
         return interaction.reply({
           content:
-            "❌ Primero tienes que vincular al jugador con `/vincular`.",
-          ephemeral: true,
+            "❌ Primero usa `/vincular` con ese jugador.",
+          ephemeral: true
         });
       }
 
-      player.daily[todayKey()] = {
-        ...getTodayStats(player),
-        hours: amount,
-      };
+      const stats = obtenerStatsDeHoy(jugador);
+      stats.horas = cantidad;
 
-      saveDatabase();
+      guardarBaseDeDatos();
 
       return interaction.reply({
         content:
-          `✅ Horas de **${player.name}** actualizadas a **${amount}**.`,
-        ephemeral: true,
+          `✅ Horas de **${jugador.nombre}** actualizadas a **${cantidad}**.`,
+        ephemeral: true
       });
     }
 
     // /registrar-stats
-    if (commandName === "registrar-stats") {
-      const user = interaction.options.getUser("jugador");
-      const turrets = interaction.options.getInteger("torretas");
+    if (comando === "registrar-stats") {
+      const usuario = interaction.options.getUser("jugador");
+      const torretas = interaction.options.getInteger("torretas");
       const dinos = interaction.options.getInteger("dinos");
-      const players = interaction.options.getInteger("jugadores");
-      const note = interaction.options.getInteger("nota");
+      const jugadores = interaction.options.getInteger("jugadores");
+      const nota = interaction.options.getInteger("nota");
 
-      const player = getPlayer(user.id);
+      const jugador = obtenerJugador(usuario.id);
 
-      if (!player) {
+      if (!jugador) {
         return interaction.reply({
           content:
-            "❌ Primero tienes que vincular al jugador con `/vincular`.",
-          ephemeral: true,
+            "❌ Primero usa `/vincular` con ese jugador.",
+          ephemeral: true
         });
       }
 
-      player.daily[todayKey()] = {
-        ...getTodayStats(player),
-        turretsBroken: turrets,
-        dinosKilled: dinos,
-        playersKilled: players,
-        note,
-        source: "manual",
-      };
+      const stats = obtenerStatsDeHoy(jugador);
 
-      saveDatabase();
+      stats.torretas = torretas;
+      stats.dinos = dinos;
+      stats.jugadores = jugadores;
+      stats.nota = nota;
+      stats.origen = "manual";
+
+      guardarBaseDeDatos();
 
       return interaction.reply({
         content:
-          `✅ Estadísticas de **${player.name}** guardadas para hoy.`,
-        ephemeral: true,
+          `✅ Estadísticas de **${jugador.nombre}** guardadas.`,
+        ephemeral: true
       });
     }
 
     // /subir-foto
-    if (commandName === "subir-foto") {
-      const user = interaction.options.getUser("jugador");
-      const attachment = interaction.options.getAttachment("foto");
+    if (comando === "subir-foto") {
+      const usuario = interaction.options.getUser("jugador");
+      const archivo = interaction.options.getAttachment("foto");
 
-      if (!attachment.contentType?.startsWith("image/")) {
+      if (!archivo.contentType?.startsWith("image/")) {
         return interaction.reply({
-          content: "❌ El archivo tiene que ser una imagen.",
-          ephemeral: true,
+          content: "❌ El archivo debe ser una imagen.",
+          ephemeral: true
         });
       }
 
-      const player = getPlayer(user.id);
+      const jugador = obtenerJugador(usuario.id);
 
-      if (!player) {
+      if (!jugador) {
         return interaction.reply({
           content:
-            "❌ Primero tienes que vincular al jugador con `/vincular`.",
-          ephemeral: true,
+            "❌ Primero usa `/vincular` con ese jugador.",
+          ephemeral: true
         });
       }
 
-      player.photoUrl = attachment.url;
-      saveDatabase();
+      jugador.foto = archivo.url;
+      guardarBaseDeDatos();
 
       return interaction.reply({
         content:
-          `✅ Foto de **${player.name}** guardada correctamente.`,
-        ephemeral: true,
+          `✅ Foto de **${jugador.nombre}** guardada.`,
+        ephemeral: true
       });
     }
 
     // /subir-captura
-    if (commandName === "subir-captura") {
-      const user = interaction.options.getUser("jugador");
-      const attachment =
+    if (comando === "subir-captura") {
+      const usuario = interaction.options.getUser("jugador");
+      const archivo =
         interaction.options.getAttachment("captura");
 
-      if (!attachment.contentType?.startsWith("image/")) {
+      if (!archivo.contentType?.startsWith("image/")) {
         return interaction.reply({
-          content: "❌ El archivo tiene que ser una imagen.",
-          ephemeral: true,
+          content: "❌ El archivo debe ser una imagen.",
+          ephemeral: true
         });
       }
 
-      const player = getPlayer(user.id);
+      const jugador = obtenerJugador(usuario.id);
 
-      if (!player) {
+      if (!jugador) {
         return interaction.reply({
           content:
-            "❌ Primero tienes que vincular al jugador con `/vincular`.",
-          ephemeral: true,
+            "❌ Primero usa `/vincular` con ese jugador.",
+          ephemeral: true
         });
       }
 
-      const stats = await analyzeImage(attachment.url);
+      const stats = obtenerStatsDeHoy(jugador);
+      stats.captura = archivo.url;
+      stats.origen = "captura";
 
-      if (!stats) {
-        return interaction.reply({
-          content: process.env.OPENAI_API_KEY
-            ? "❌ No pude leer la captura. Usa `/registrar-stats` para introducir los datos."
-            : "ℹ️ No hay OPENAI_API_KEY configurada. Usa `/registrar-stats` para introducir los datos manualmente.",
-          ephemeral: true,
-        });
-      }
-
-      player.daily[todayKey()] = {
-        ...getTodayStats(player),
-        ...stats,
-      };
-
-      saveDatabase();
+      guardarBaseDeDatos();
 
       return interaction.reply({
         content:
-          `✅ Captura analizada y estadísticas de **${player.name}** guardadas.`,
-        ephemeral: true,
+          `✅ Captura de **${jugador.nombre}** guardada.`,
+        ephemeral: true
       });
     }
 
     // /performance
-    if (commandName === "performance") {
-      const user = interaction.options.getUser("jugador");
-      const player = getPlayer(user.id);
+    if (comando === "performance") {
+      const usuario = interaction.options.getUser("jugador");
+      const jugador = obtenerJugador(usuario.id);
 
-      if (!player) {
+      if (!jugador) {
         return interaction.reply({
           content:
             "❌ Ese jugador todavía no está vinculado.",
-          ephemeral: true,
+          ephemeral: true
         });
       }
 
       return interaction.reply({
         embeds: [
-          createPerformanceEmbed(user, player),
-        ],
+          crearEmbedPerformance(usuario, jugador)
+        ]
       });
     }
 
     // /tribu
-    if (commandName === "tribu") {
-      const players = getPlayerChoices();
+    if (comando === "tribu") {
+      const jugadores = Object.entries(database.players)
+        .slice(0, 25)
+        .map(([id, jugador]) => ({
+          id,
+          nombre: jugador.nombre
+        }));
 
-      if (!players.length) {
+      if (jugadores.length === 0) {
         return interaction.reply({
           content:
             "❌ Todavía no hay jugadores vinculados.",
-          ephemeral: true,
+          ephemeral: true
         });
       }
 
       const menu = new StringSelectMenuBuilder()
-        .setCustomId("tribe-performance")
-        .setPlaceholder("Selecciona un miembro de la tribu")
+        .setCustomId("selector-performance")
+        .setPlaceholder("Selecciona un jugador")
         .addOptions(
-          players.map(player =>
+          jugadores.map(jugador =>
             new StringSelectMenuOptionBuilder()
-              .setLabel(player.name.slice(0, 100))
-              .setValue(player.id)
-              .setDescription("Ver performance de hoy")
+              .setLabel(jugador.nombre.slice(0, 100))
+              .setValue(jugador.id)
+              .setDescription("Ver su performance de hoy")
           )
         );
 
@@ -716,36 +619,40 @@ client.on("interactionCreate", async interaction => {
         .setColor(0x8b5cf6)
         .setTitle("📊 Performance de la tribu")
         .setDescription(
-          "Selecciona un jugador para ver su foto y sus estadísticas de hoy."
+          "Selecciona un miembro para ver su foto y sus estadísticas."
         );
 
       return interaction.reply({
         embeds: [embed],
         components: [
-          new ActionRowBuilder().addComponents(menu),
-        ],
+          new ActionRowBuilder().addComponents(menu)
+        ]
       });
     }
   } catch (error) {
-    console.error("Error en interacción:", error);
-
-    const response = {
-      content: "❌ Ha ocurrido un error procesando el comando.",
-      ephemeral: true,
-    };
+    console.error("Error procesando interacción:", error);
 
     if (interaction.replied || interaction.deferred) {
-      await interaction.followUp(response).catch(() => {});
+      await interaction.followUp({
+        content: "❌ Ha ocurrido un error.",
+        ephemeral: true
+      }).catch(() => {});
     } else {
-      await interaction.reply(response).catch(() => {});
+      await interaction.reply({
+        content: "❌ Ha ocurrido un error.",
+        ephemeral: true
+      }).catch(() => {});
     }
   }
 });
 
-// Arranque
-registerCommands()
+// ===============================
+// ARRANQUE
+// ===============================
+
+registrarComandos()
   .then(() => client.login(TOKEN))
   .catch(error => {
-    console.error("No se pudo iniciar el bot:", error);
-    process.exitCode = 1;
+    console.error("No se pudo arrancar el bot:", error);
+    process.exit(1);
   });
