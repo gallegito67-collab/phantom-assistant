@@ -545,6 +545,14 @@ async function fijarPanel(interaction, tipo, embed) {
     mensaje = await canal.messages.fetch(
       configuracion.panel.messageId
     ).catch(() => null);
+
+    // El mensaje pudo haberse borrado desde Discord.
+    // Limpiamos la referencia para que el siguiente envío
+    // cree un panel completamente nuevo.
+    if (!mensaje) {
+      configuracion.panel = null;
+      guardarBaseDeDatos();
+    }
   }
 
   if (mensaje) {
@@ -563,6 +571,32 @@ async function fijarPanel(interaction, tipo, embed) {
 
   guardarBaseDeDatos();
   return { ok: true };
+}
+
+function borrarReferenciaDePanel(messageId) {
+  const paneles = [
+    database.caHistorial,
+    database.spot,
+    database.nextWipe
+  ];
+
+  let cambiado = false;
+
+  for (const panel of paneles) {
+    if (panel?.panel?.messageId === messageId) {
+      panel.panel = null;
+      cambiado = true;
+    }
+  }
+
+  if (database.onlineTribe?.messageId === messageId) {
+    database.onlineTribe = null;
+    cambiado = true;
+  }
+
+  if (cambiado) {
+    guardarBaseDeDatos();
+  }
 }
 
 // ==========================================
@@ -1729,6 +1763,13 @@ client.once(
      * después de conectar Discord.
      */
     iniciarMonitorPSN();
+  }
+);
+
+client.on(
+  "messageDelete",
+  mensaje => {
+    borrarReferenciaDePanel(mensaje.id);
   }
 );
 
