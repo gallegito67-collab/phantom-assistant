@@ -19,7 +19,7 @@ try {
   psnApi = require("psn-api");
 } catch (error) {
   console.warn(
-    "⚠️ psn-api no está instalado. Ejecuta: npm install psn-api"
+    "psn-api no está instalado. Ejecuta: npm install psn-api"
   );
 }
 
@@ -448,7 +448,10 @@ function crearEmbedPanel(
   imagenPequena = PANEL_THUMBNAIL
 ) {
   return new EmbedBuilder()
-    .setColor(0xffffff)
+    .setColor(0x5865f2)
+    .setAuthor({
+      name: "Cluster Alpha"
+    })
     .setTitle(titulo)
     .setDescription(descripcion)
     .setThumbnail(imagenArriba)
@@ -465,13 +468,13 @@ function crearHistorialEmbed(imagenes = {}) {
   const texto = servidores.length
     ? servidores.map((item, indice) =>
         `**${indice + 1}. ${item.server}**\n` +
-        `⭐ Puntos: **${item.puntos}**\n` +
-        `🏠 Vivíamos en: ${item.vivienda}`
+        `Puntos: **${item.puntos}**\n` +
+        `Base: ${item.vivienda}`
       ).join("\n\n")
     : "Todavía no hay servidores registrados.";
 
   return crearEmbedPanel(
-    "📚 Historial — Cluster Alpha",
+    "Historial de servidores",
     texto,
     imagenes.arriba,
     imagenes.abajo,
@@ -482,10 +485,10 @@ function crearHistorialEmbed(imagenes = {}) {
 function crearSpotEmbed(imagenes = {}) {
   const spot = database.spot;
   return crearEmbedPanel(
-    "📍 Spot actual — Cluster Alpha",
-    `🏠 **Cueva:** ${spot.cueva || "Sin configurar"}\n` +
-    `🗺️ **Mapa:** ${spot.mapa || "Sin configurar"}\n` +
-    `🖥️ **Server:** ${spot.server || "Sin configurar"}`,
+    "Spot actual",
+    `**Cueva**\n${spot.cueva || "Sin configurar"}\n\n` +
+    `**Mapa**\n${spot.mapa || "Sin configurar"}\n\n` +
+    `**Servidor**\n${spot.server || "Sin configurar"}`,
     imagenes.arriba,
     imagenes.abajo,
     imagenes.pequena
@@ -495,9 +498,9 @@ function crearSpotEmbed(imagenes = {}) {
 function crearNextWipeEmbed(imagenes = {}) {
   const wipe = database.nextWipe;
   return crearEmbedPanel(
-    "⏭️ Next wipe — Cluster Alpha",
-    `📅 **Próximo wipe:** ${wipe.fecha || "Sin configurar"}\n` +
-    `🖥️ **Próximo server:** ${wipe.server || "Sin configurar"}`,
+    "Próximo wipe",
+    `**Fecha**\n${wipe.fecha || "Sin configurar"}\n\n` +
+    `**Servidor**\n${wipe.server || "Sin configurar"}`,
     imagenes.arriba,
     imagenes.abajo,
     imagenes.pequena
@@ -556,8 +559,20 @@ async function fijarPanel(interaction, tipo, embed) {
   }
 
   if (mensaje) {
-    await mensaje.edit({ embeds: [embed] });
-  } else {
+    try {
+      await mensaje.edit({ embeds: [embed] });
+    } catch (error) {
+      // Si se borró justo antes de editarlo, lo recreamos.
+      if (error?.code === 10008) {
+        mensaje = null;
+        configuracion.panel = null;
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  if (!mensaje) {
     mensaje = await canal.send({ embeds: [embed] });
   }
 
@@ -658,7 +673,7 @@ async function obtenerAutorizacionPSN() {
 
   if (!PSN_NPSSO) {
     console.warn(
-      "⚠️ Falta PSN_NPSSO."
+      "Falta PSN_NPSSO."
     );
 
     return null;
@@ -678,7 +693,7 @@ async function obtenerAutorizacionPSN() {
         );
 
     console.log(
-      "✅ Autenticación PSN completada."
+      "Autenticación PSN completada."
     );
 
     return psnAuthorization;
@@ -688,7 +703,7 @@ async function obtenerAutorizacionPSN() {
       null;
 
     console.error(
-      "❌ Error autenticando PSN:",
+      "Error autenticando PSN:",
       error?.message ||
       error
     );
@@ -831,9 +846,12 @@ function crearOnlineTribeEmbed() {
 
   const embed =
     new EmbedBuilder()
-      .setColor(0xffffff)
+      .setColor(0x5865f2)
+      .setAuthor({
+        name: "Cluster Alpha"
+      })
       .setTitle(
-        "🎮 ONLINE TRIBE"
+        "ONLINE TRIBE"
       )
       .setDescription(
         jugadores.length === 0
@@ -855,18 +873,13 @@ function crearOnlineTribeEmbed() {
   const lineas =
     jugadores.map(
       ([, jugador]) => {
-        const icono =
-          jugador.online === true
-            ? "🟢"
-            : "🔴";
-
         const estado =
           jugador.online === true
             ? "Online"
             : "Offline";
 
         return (
-          `${icono} **${jugador.nombre}** — ${estado}`
+          `• **${jugador.nombre}** — ${estado}`
         );
       }
     );
@@ -915,6 +928,11 @@ async function actualizarMensajeOnlineTribe() {
     });
 
   } catch (error) {
+    if (error?.code === 10008) {
+      database.onlineTribe = null;
+      guardarBaseDeDatos();
+    }
+
     console.error(
       "No se pudo actualizar ONLINE TRIBE:",
       error?.message ||
@@ -1098,7 +1116,7 @@ async function actualizarPresencias() {
           true;
 
         console.log(
-          `🟢 ${jugador.nombre} está ONLINE en PSN`
+          `${jugador.nombre} está ONLINE en PSN`
         );
       }
 
@@ -1118,7 +1136,7 @@ async function actualizarPresencias() {
           true;
 
         console.log(
-          `🔴 ${jugador.nombre} está OFFLINE en PSN`
+          `${jugador.nombre} está OFFLINE en PSN`
         );
       }
 
@@ -1240,8 +1258,8 @@ function crearPerformanceEmbed(
 
   const estadoPSN =
     jugador.online === true
-      ? "🟢 Online"
-      : "🔴 Offline";
+      ? "Online"
+      : "Offline";
 
   const tiempoOnline =
     formatearHorasOnline(
@@ -1250,9 +1268,12 @@ function crearPerformanceEmbed(
 
   const embed =
     new EmbedBuilder()
-      .setColor(0xffffff)
+      .setColor(0x5865f2)
+      .setAuthor({
+        name: "Cluster Alpha"
+      })
       .setTitle(
-        `📊 Performance — ${jugador.nombre}`
+        `Performance — ${jugador.nombre}`
       )
       .setThumbnail(
         PERFORMANCE_GIF
@@ -1261,7 +1282,7 @@ function crearPerformanceEmbed(
 
         {
           name:
-            "🎮 PSN",
+            "PSN",
           value:
             jugador.psn ||
             "No vinculado",
@@ -1280,7 +1301,7 @@ function crearPerformanceEmbed(
 
         {
           name:
-            "⏱️ Tiempo online PSN hoy",
+            "Tiempo online PSN hoy",
           value:
             tiempoOnline,
           inline:
@@ -1298,7 +1319,7 @@ function crearPerformanceEmbed(
 
         {
           name:
-            "🔫 Torretas",
+        "Torretas",
           value:
             String(
               stats.torretas
@@ -1309,7 +1330,7 @@ function crearPerformanceEmbed(
 
         {
           name:
-            "🦖 Dinos",
+        "Dinos",
           value:
             String(
               stats.dinos
@@ -1320,7 +1341,7 @@ function crearPerformanceEmbed(
 
         {
           name:
-            "💀 Jugadores",
+        "Jugadores",
           value:
             String(
               stats.jugadores
@@ -1331,7 +1352,7 @@ function crearPerformanceEmbed(
 
         {
           name:
-            "⭐ Nota",
+            "Nota",
           value:
             `${nota}/10\n${barra}`,
           inline:
@@ -1344,7 +1365,7 @@ function crearPerformanceEmbed(
   ) {
     embed.addFields({
       name:
-        "🎮 Juego actual",
+        "Juego actual",
       value:
         jugador.juegoActual,
       inline:
@@ -1357,7 +1378,7 @@ function crearPerformanceEmbed(
   ) {
     embed.addFields({
       name:
-        "🕹️ Plataforma",
+        "Plataforma",
       value:
         jugador.plataformaActual,
       inline:
@@ -1735,7 +1756,7 @@ async function registrarComandos() {
   );
 
   console.log(
-    `✅ ${comandos.length} comandos registrados.`
+    `${comandos.length} comandos registrados.`
   );
 }
 
@@ -1746,7 +1767,8 @@ async function registrarComandos() {
 const client =
   new Client({
     intents: [
-      GatewayIntentBits.Guilds
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages
     ]
   });
 
@@ -1755,7 +1777,7 @@ client.once(
   () => {
 
     console.log(
-      `✅ Bot conectado como ${client.user.tag}`
+      `Bot conectado como ${client.user.tag}`
     );
 
     /*
@@ -1922,7 +1944,7 @@ client.on(
 
           return interaction.reply({
             content: resultado.ok
-              ? `✅ Servidor **${server}** ${existente ? "actualizado" : "añadido"} y panel fijado en este canal.`
+              ? `Servidor **${server}** ${existente ? "actualizado" : "añadido"} y panel fijado en este canal.`
               : resultado.mensaje,
             ephemeral: true
           });
@@ -1955,7 +1977,7 @@ client.on(
 
           return interaction.reply({
             content: resultado.ok
-              ? "✅ Spot actualizado y panel fijado en este canal."
+              ? "Spot actualizado y panel fijado en este canal."
               : resultado.mensaje,
             ephemeral: true
           });
@@ -1986,7 +2008,7 @@ client.on(
 
           return interaction.reply({
             content: resultado.ok
-              ? "✅ Next wipe actualizado y panel fijado en este canal."
+              ? "Next wipe actualizado y panel fijado en este canal."
               : resultado.mensaje,
             ephemeral: true
           });
@@ -2517,7 +2539,7 @@ client.on(
 
         return interaction.editReply({
           content:
-            `${usuario} ha sido vinculado con PSN **${psn}** correctamente.\n\n🟢 El bot comprobará automáticamente su estado online cada minuto.`
+            `${usuario} ha sido vinculado con PSN **${psn}** correctamente.\n\nEl bot comprobará automáticamente su estado online cada minuto.`
         });
       }
 
@@ -2974,6 +2996,11 @@ client.on(
               .catch(
                 () => null
               );
+
+          if (!mensaje) {
+            database.onlineTribe = null;
+            guardarBaseDeDatos();
+          }
         }
 
         /*
@@ -3028,7 +3055,7 @@ client.on(
 
         return interaction.editReply({
           content:
-            "✅ **ONLINE TRIBE configurado correctamente.**\n\n" +
+            "**ONLINE TRIBE configurado correctamente.**\n\n" +
             "El mismo mensaje se actualizará automáticamente cada minuto.\n" +
             "Los nuevos jugadores vinculados aparecerán automáticamente."
         });
@@ -3097,7 +3124,7 @@ registrarComandos()
     () => {
 
       console.log(
-        "🚀 Inicio completado."
+        "Inicio completado."
       );
 
     }
@@ -3107,7 +3134,7 @@ registrarComandos()
     error => {
 
       console.error(
-        "❌ No se pudo iniciar el bot:",
+        "No se pudo iniciar el bot:",
         error
       );
 
