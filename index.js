@@ -448,10 +448,7 @@ function crearEmbedPanel(
   imagenPequena = PANEL_THUMBNAIL
 ) {
   return new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setAuthor({
-      name: "Cluster Alpha"
-    })
+    .setColor(0xffffff)
     .setTitle(titulo)
     .setDescription(descripcion)
     .setThumbnail(imagenArriba)
@@ -871,12 +868,15 @@ function crearOnlineTribeEmbed() {
 
   const embed =
     new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setAuthor({
-        name: "Cluster Alpha"
-      })
+      .setColor(0xffffff)
       .setTitle(
         "ONLINE TRIBE"
+      )
+      .setThumbnail(
+        PANEL_THUMBNAIL
+      )
+      .setImage(
+        PANEL_IMAGE
       )
       .setDescription(
         jugadores.length === 0
@@ -903,8 +903,13 @@ function crearOnlineTribeEmbed() {
             ? "Online"
             : "Offline";
 
+        const indicador =
+          jugador.online === true
+            ? "🟢"
+            : "🔴";
+
         return (
-          `• **${jugador.nombre}** — ${estado}`
+          `${indicador} **${jugador.nombre}** — ${estado}`
         );
       }
     );
@@ -1293,10 +1298,7 @@ function crearPerformanceEmbed(
 
   const embed =
     new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setAuthor({
-        name: "Cluster Alpha"
-      })
+      .setColor(0xffffff)
       .setTitle(
         `Performance — ${jugador.nombre}`
       )
