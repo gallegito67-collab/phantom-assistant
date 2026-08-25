@@ -749,7 +749,7 @@ async function obtenerAccountIdPSN(
     const encontrado =
       dominio?.results?.[0];
 
-    return (
+    const accountIdEncontrado =
       encontrado
         ?.socialMetadata
         ?.accountId ||
@@ -758,7 +758,32 @@ async function obtenerAccountIdPSN(
         ?.accountId ||
 
       null
-    );
+    ;
+
+    if (accountIdEncontrado) {
+      return accountIdEncontrado;
+    }
+
+    /*
+     * PSN no incluye la cuenta que está autenticada
+     * en los resultados de Universal Search. Usamos
+     * el endpoint de perfil como alternativa para
+     * poder vincular la propia cuenta del owner.
+     */
+    if (
+      typeof psnApi.getProfileFromUserName ===
+      "function"
+    ) {
+      const perfil =
+        await psnApi.getProfileFromUserName(
+          authorization,
+          psn
+        );
+
+      return perfil?.profile?.accountId || null;
+    }
+
+    return null;
 
   } catch (error) {
     console.error(
