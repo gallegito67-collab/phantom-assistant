@@ -552,23 +552,186 @@ function obtenerConfiguracionPanelInformacion(tipo) {
   const configuraciones = {
     spot: {
       clave: "spot",
-      nombre: "Spot"
+      nombre: "Spot",
+      variableCanal: "SPOT_CHANNEL_ID",
+      nombresCanal: ["spot"],
+      titulosEmbed: ["spot actual", "spot"]
     },
     "ca-historial": {
       clave: "caHistorial",
-      nombre: "CA Historial"
+      nombre: "CA Historial",
+      variableCanal: "CA_HISTORIAL_CHANNEL_ID",
+      nombresCanal: [
+        "ca-ganados",
+        "ca-historial",
+        "ca-historia",
+        "historial"
+      ],
+      titulosEmbed: [
+        "historial de servidores",
+        "ca historial",
+        "historial"
+      ]
     },
     "next-wipe": {
       clave: "nextWipe",
-      nombre: "Next Wipe"
+      nombre: "Next Wipe",
+      variableCanal: "NEXT_WIPE_CHANNEL_ID",
+      nombresCanal: [
+        "siguiente-wipe",
+        "next-wipe",
+        "next_wipe",
+        "wipe"
+      ],
+      titulosEmbed: [
+        "próximo wipe",
+        "next wipe",
+        "siguiente wipe"
+      ]
     },
     "online-status": {
       clave: "onlineTribe",
-      nombre: "Online Status"
+      nombre: "Online Status",
+      variableCanal: "ONLINE_STATUS_CHANNEL_ID",
+      nombresCanal: [
+        "online-status",
+        "online-tribe",
+        "online_status",
+        "online"
+      ],
+      titulosEmbed: [
+        "online tribe",
+        "online status",
+        "estado online"
+      ]
     }
   };
 
   return configuraciones[tipo] || null;
+}
+
+function obtenerReferenciaPanel(tipo, configuracion) {
+  if (configuracion.clave === "onlineTribe") {
+    return database.onlineTribe;
+  }
+
+  return database[configuracion.clave]?.panel || null;
+}
+
+function guardarReferenciaPanel(tipo, configuracion, referencia) {
+  if (configuracion.clave === "onlineTribe") {
+    database.onlineTribe = referencia;
+  } else {
+    database[configuracion.clave].panel = referencia;
+  }
+}
+
+async function buscarPanelEnCanales(tipo, configuracion) {
+  const idCanalConfigurado =
+    process.env[configuracion.variableCanal];
+
+  const canales = [
+    ...client.channels.cache.values()
+  ].filter(canal =>
+    canal.guildId === GUILD_ID &&
+    canal.isTextBased() &&
+    typeof canal.messages?.fetch === "function"
+  );
+
+  const canalesOrdenados = canales.sort((a, b) => {
+    const aEsConfigurado =
+      idCanalConfigurado && a.id === idCanalConfigurado;
+    const bEsConfigurado =
+      idCanalConfigurado && b.id === idCanalConfigurado;
+
+    if (aEsConfigurado !== bEsConfigurado) {
+      return aEsConfigurado ? -1 : 1;
+    }
+
+    const aCoincide =
+      configuracion.nombresCanal.includes(
+        a.name?.toLowerCase()
+      );
+    const bCoincide =
+      configuracion.nombresCanal.includes(
+        b.name?.toLowerCase()
+      );
+
+    if (aCoincide !== bCoincide) {
+      return aCoincide ? -1 : 1;
+    }
+
+    return 0;
+  });
+
+  for (const canal of canalesOrdenados) {
+    if (
+      idCanalConfigurado &&
+      canal.id !== idCanalConfigurado
+    ) {
+      continue;
+    }
+
+    if (
+      !idCanalConfigurado &&
+      !configuracion.nombresCanal.includes(
+        canal.name?.toLowerCase()
+      )
+    ) {
+      continue;
+    }
+
+    const mensajes = await canal.messages.fetch({
+      limit: 100
+    }).catch(() => null);
+
+    if (!mensajes) {
+      continue;
+    }
+
+    const mensajesConEmbed =
+      [...mensajes.values()].filter(
+        mensaje => mensaje.embeds?.length
+      );
+
+    const mensajeEncontrado =
+      mensajesConEmbed.find(mensaje => {
+        const titulo =
+          mensaje.embeds[0].title
+            ?.toLowerCase()
+            .trim() || "";
+
+        return configuracion.titulosEmbed.some(
+          tituloEsperado =>
+            titulo === tituloEsperado ||
+            titulo.includes(tituloEsperado)
+        );
+      }) ||
+      mensajesConEmbed[0];
+
+    if (!mensajeEncontrado) {
+      continue;
+    }
+
+    const referencia = {
+      channelId: canal.id,
+      messageId: mensajeEncontrado.id
+    };
+
+    guardarReferenciaPanel(
+      tipo,
+      configuracion,
+      referencia
+    );
+    guardarBaseDeDatos();
+
+    return {
+      mensaje: mensajeEncontrado,
+      referencia
+    };
+  }
+
+  return null;
 }
 
 /*
@@ -588,13 +751,29 @@ async function obtenerEmbedDesdePanel(tipo) {
     };
   }
 
-  const panel =
-    database[configuracion.clave]?.panel ||
-    (
-      configuracion.clave === "onlineTribe"
-        ? database.onlineTribe
-        : null
+  let panel =
+    obtenerReferenciaPanel(
+      tipo,
+      configuracion
     );
+
+  /*
+   * Si el bot se reinició, se perdió la base de datos o el panel se creó
+   * antes de esta función, localizamos el embed por el nombre del canal.
+   * Los IDs encontrados se guardan para que las siguientes consultas sean
+   * rápidas.
+   */
+  if (!panel?.channelId || !panel?.messageId) {
+    const encontrado =
+      await buscarPanelEnCanales(
+        tipo,
+        configuracion
+      );
+
+    if (encontrado) {
+      panel = encontrado.referencia;
+    }
+  }
 
   if (!panel?.channelId || !panel?.messageId) {
     return {
@@ -622,6 +801,19 @@ async function obtenerEmbedDesdePanel(tipo) {
     );
 
     if (!mensaje.embeds?.length) {
+      const encontrado =
+        await buscarPanelEnCanales(
+          tipo,
+          configuracion
+        );
+
+      if (encontrado) {
+        return {
+          ok: true,
+          embed: encontrado.mensaje.embeds[0].toJSON()
+        };
+      }
+
       return {
         ok: false,
         mensaje:
@@ -634,8 +826,24 @@ async function obtenerEmbedDesdePanel(tipo) {
       embed: mensaje.embeds[0].toJSON()
     };
   } catch (error) {
-    if (error?.code === 10008) {
+    if (
+      error?.code === 10003 ||
+      error?.code === 10008
+    ) {
       borrarReferenciaDePanel(panel.messageId);
+
+      const encontrado =
+        await buscarPanelEnCanales(
+          tipo,
+          configuracion
+        );
+
+      if (encontrado) {
+        return {
+          ok: true,
+          embed: encontrado.mensaje.embeds[0].toJSON()
+        };
+      }
     }
 
     console.error(
@@ -2047,9 +2255,6 @@ client.on(
                 jugador
               )
             ],
-            components: [
-              crearBotonesInformacion()
-            ],
             ephemeral: true
           });
         }
@@ -2067,9 +2272,6 @@ client.on(
         return interaction.reply({
           embeds: [
             resultado.embed
-          ],
-          components: [
-            crearBotonesInformacion()
           ],
           ephemeral: true
         });
