@@ -626,17 +626,57 @@ function guardarReferenciaPanel(tipo, configuracion, referencia) {
   }
 }
 
+function normalizarNombreCanal(nombre) {
+  return String(nombre || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 async function buscarPanelEnCanales(tipo, configuracion) {
   const idCanalConfigurado =
     process.env[configuracion.variableCanal];
 
-  const canales = [
-    ...client.channels.cache.values()
-  ].filter(canal =>
-    canal.guildId === GUILD_ID &&
+  /*
+   * La caché puede no contener todos los canales justo después de
+   * reiniciar el bot. Cargamos la lista completa del servidor antes de
+   * buscar los paneles.
+   */
+  const guild =
+    client.guilds.cache.get(GUILD_ID) ||
+    client.guilds.cache.first();
+
+  let canales = [];
+
+  if (guild?.channels?.fetch) {
+    const canalesDelServidor =
+      await guild.channels.fetch().catch(() => null);
+
+    if (canalesDelServidor) {
+      canales = [
+        ...canalesDelServidor.values()
+      ];
+    }
+  }
+
+  if (canales.length === 0) {
+    canales = [
+      ...client.channels.cache.values()
+    ];
+  }
+
+  canales = canales.filter(canal =>
+    canal.guildId === guild?.id &&
     canal.isTextBased() &&
     typeof canal.messages?.fetch === "function"
   );
+
+  const nombresCanal =
+    configuracion.nombresCanal.map(
+      normalizarNombreCanal
+    );
 
   const canalesOrdenados = canales.sort((a, b) => {
     const aEsConfigurado =
@@ -649,12 +689,12 @@ async function buscarPanelEnCanales(tipo, configuracion) {
     }
 
     const aCoincide =
-      configuracion.nombresCanal.includes(
-        a.name?.toLowerCase()
+      nombresCanal.includes(
+        normalizarNombreCanal(a.name)
       );
     const bCoincide =
-      configuracion.nombresCanal.includes(
-        b.name?.toLowerCase()
+      nombresCanal.includes(
+        normalizarNombreCanal(b.name)
       );
 
     if (aCoincide !== bCoincide) {
@@ -674,8 +714,8 @@ async function buscarPanelEnCanales(tipo, configuracion) {
 
     if (
       !idCanalConfigurado &&
-      !configuracion.nombresCanal.includes(
-        canal.name?.toLowerCase()
+      !nombresCanal.includes(
+        normalizarNombreCanal(canal.name)
       )
     ) {
       continue;
