@@ -6,6 +6,8 @@ const {
   SlashCommandBuilder,
   EmbedBuilder,
   ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -502,6 +504,151 @@ function crearNextWipeEmbed(imagenes = {}) {
     imagenes.abajo,
     imagenes.pequena
   );
+}
+
+function crearMenuInformacionEmbed() {
+  return new EmbedBuilder()
+    .setColor(0xffffff)
+    .setTitle("Información de Cluster Alpha")
+    .setDescription(
+      "¡Qué tal! ¿Qué necesitas saber?\n\n" +
+      "Elige una opción para consultar la información actual."
+    )
+    .setThumbnail(PANEL_THUMBNAIL)
+    .setImage(PANEL_IMAGE)
+    .setFooter({
+      text: "Cluster Alpha",
+      iconURL: PANEL_THUMBNAIL
+    })
+    .setTimestamp();
+}
+
+function crearBotonesInformacion() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("info:spot")
+      .setLabel("Spot")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("info:ca-historial")
+      .setLabel("CA Historial")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("info:next-wipe")
+      .setLabel("Next Wipe")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("info:performance")
+      .setLabel("Performance")
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId("info:online-status")
+      .setLabel("Online Status")
+      .setStyle(ButtonStyle.Success)
+  );
+}
+
+function obtenerConfiguracionPanelInformacion(tipo) {
+  const configuraciones = {
+    spot: {
+      clave: "spot",
+      nombre: "Spot"
+    },
+    "ca-historial": {
+      clave: "caHistorial",
+      nombre: "CA Historial"
+    },
+    "next-wipe": {
+      clave: "nextWipe",
+      nombre: "Next Wipe"
+    },
+    "online-status": {
+      clave: "onlineTribe",
+      nombre: "Online Status"
+    }
+  };
+
+  return configuraciones[tipo] || null;
+}
+
+/*
+ * Los botones no leen la copia de la base de datos. Leen el embed del
+ * mensaje configurado como panel fuente en Discord. De esta manera, si
+ * el owner edita ese embed, la siguiente consulta siempre devuelve el
+ * contenido más reciente.
+ */
+async function obtenerEmbedDesdePanel(tipo) {
+  const configuracion =
+    obtenerConfiguracionPanelInformacion(tipo);
+
+  if (!configuracion) {
+    return {
+      ok: false,
+      mensaje: "Ese panel no existe."
+    };
+  }
+
+  const panel =
+    database[configuracion.clave]?.panel ||
+    (
+      configuracion.clave === "onlineTribe"
+        ? database.onlineTribe
+        : null
+    );
+
+  if (!panel?.channelId || !panel?.messageId) {
+    return {
+      ok: false,
+      mensaje:
+        `El panel **${configuracion.nombre}** todavía no está configurado.`
+    };
+  }
+
+  try {
+    const canal = await client.channels.fetch(
+      panel.channelId
+    );
+
+    if (!canal || !canal.isTextBased()) {
+      return {
+        ok: false,
+        mensaje:
+          `No puedo leer el canal del panel **${configuracion.nombre}**.`
+      };
+    }
+
+    const mensaje = await canal.messages.fetch(
+      panel.messageId
+    );
+
+    if (!mensaje.embeds?.length) {
+      return {
+        ok: false,
+        mensaje:
+          `El mensaje del panel **${configuracion.nombre}** no contiene ningún embed.`
+      };
+    }
+
+    return {
+      ok: true,
+      embed: mensaje.embeds[0].toJSON()
+    };
+  } catch (error) {
+    if (error?.code === 10008) {
+      borrarReferenciaDePanel(panel.messageId);
+    }
+
+    console.error(
+      `No se pudo leer el panel ${configuracion.nombre}:`,
+      error?.message || error
+    );
+
+    return {
+      ok: false,
+      mensaje:
+        `No he podido leer el panel **${configuracion.nombre}**. Comprueba que el mensaje siga existiendo y que el bot tenga permisos para ver el canal.`
+    };
+  }
 }
 
 function obtenerImagenesDesdeFormulario(interaction, customId) {
@@ -1795,7 +1942,8 @@ const client =
   new Client({
     intents: [
       GatewayIntentBits.Guilds,
-      GatewayIntentBits.GuildMessages
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent
     ]
   });
 
@@ -1822,6 +1970,43 @@ client.on(
   }
 );
 
+/*
+ * Cuando alguien menciona al bot, abrimos el menú de consultas.
+ * MessageContent es necesario para que Discord entregue el contenido
+ * de los mensajes y sus menciones al bot.
+ */
+client.on(
+  "messageCreate",
+  async mensaje => {
+    if (
+      mensaje.author.bot ||
+      !client.user ||
+      !mensaje.guild ||
+      !mensaje.mentions.has(client.user.id)
+    ) {
+      return;
+    }
+
+    try {
+      await mensaje.reply({
+        content:
+          `¡Qué tal, ${mensaje.author}! ¿Qué necesitas saber?`,
+        embeds: [
+          crearMenuInformacionEmbed()
+        ],
+        components: [
+          crearBotonesInformacion()
+        ]
+      });
+    } catch (error) {
+      console.error(
+        "No se pudo responder a la mención:",
+        error?.message || error
+      );
+    }
+  }
+);
+
 // ==========================================
 // INTERACCIONES
 // ==========================================
@@ -1831,6 +2016,64 @@ client.on(
   async interaction => {
 
     try {
+
+      // ========================================
+      // BOTONES DEL MENÚ DE INFORMACIÓN
+      // ========================================
+
+      if (
+        interaction.isButton() &&
+        interaction.customId.startsWith("info:")
+      ) {
+        const tipo =
+          interaction.customId.slice("info:".length);
+
+        if (tipo === "performance") {
+          const jugador =
+            obtenerJugador(interaction.user.id);
+
+          if (!jugador) {
+            return interaction.reply({
+              content:
+                "Todavía no tienes una performance vinculada. El owner debe vincularte con `/vincular`.",
+              ephemeral: true
+            });
+          }
+
+          return interaction.reply({
+            embeds: [
+              crearPerformanceEmbed(
+                interaction.user,
+                jugador
+              )
+            ],
+            components: [
+              crearBotonesInformacion()
+            ],
+            ephemeral: true
+          });
+        }
+
+        const resultado =
+          await obtenerEmbedDesdePanel(tipo);
+
+        if (!resultado.ok) {
+          return interaction.reply({
+            content: resultado.mensaje,
+            ephemeral: true
+          });
+        }
+
+        return interaction.reply({
+          embeds: [
+            resultado.embed
+          ],
+          components: [
+            crearBotonesInformacion()
+          ],
+          ephemeral: true
+        });
+      }
 
       // ========================================
       // PANELES DE CLUSTER ALPHA
